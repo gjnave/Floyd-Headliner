@@ -10,36 +10,41 @@ The guided setup page is being prepared. Bookmark it for the fastest way to get
 Floyd Headliner installed and running. For walkthroughs and updates, visit
 [The AI Hobby Guy on YouTube](https://youtube.com/@theaihobbyguy).
 
-Floyd Headliner is a local Windows head-swap app: provide a **body reference**
+Floyd Headliner is a local Windows likeness-transfer app: provide a **body reference**
 for pose, clothing, and scene, then a **head reference** for face, hair, and
-likeness. Get Going Fast packages the app with a branded interface and
-double-click launcher. It recreates the active image-edit path from
+likeness. It recreates the active image-edit path from
 `Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
 It does not install, import, launch, call, or package ComfyUI.
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
 
-## Install and run
+## Install and run from source
 
-The installer and launcher BAT files are not yet uploaded to this source
-repository. The [Quick Setup Helper](https://getgoingfast.pro/tools/floydheadliner)
-will provide the guided package. Once you have that package:
+For guided setup, use the [Quick Setup Helper](https://getgoingfast.pro/tools/floydheadliner)
+at Get Going Fast. This public repository contains the app source; the
+one-click setup package is a separate Get Going Fast member offering.
 
-1. Double-click `INSTALL-BFS-SWAP.bat`.
-2. Allow the approximately 35 GB (32.4 GiB) model download to complete. Re-running the
-   installer resumes incomplete Hugging Face downloads and preserves valid files.
-3. Double-click `START-BFS-SWAP.bat`.
-4. Add the body/base image on the left and the head reference in the middle.
-   Optionally enter a short **Extra prompt** above Advanced settings, such as
-   "Remove the hat." It is appended to the full head-swap instruction below.
-5. Click **Swap Head**.
-   You can also press **Ctrl+Enter** while using the app.
+To set up this source checkout yourself on Windows, open **Command Prompt** in
+the repository root and run:
 
-Generated PNG files are saved under `BFS-Swap\outputs` in the packaged app, or
-`outputs/` when running the source from this repository root.
-The distribution ZIP contains the installer and app source only. The installer
-downloads the base model and both LoRAs; the ZIP does not contain model weights,
-the private Python environment, or generated images.
+```bat
+py -3.11 -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+.venv\Scripts\python.exe -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu130
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe download_models.py
+.venv\Scripts\python.exe app.py
+```
+
+The model downloader retrieves the approximately 35 GB base model and two
+LoRAs from the original publishers. You can rerun it to resume incomplete
+downloads. If you prefer to obtain the files yourself, see [Model sources](#model-sources)
+for direct links and the expected folder layout.
+
+In the app, add the body/base image on the left and the head reference in the
+middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
+**Swap Head**, or press **Ctrl+Enter**. Generated PNG files are saved in
+`outputs/` in this source checkout.
 
 ## What is reproduced
 
@@ -56,7 +61,7 @@ Diffusers uses Qwen Image 2.1's official FlowMatch Euler scheduler. It is the
 standalone pipeline equivalent, not ComfyUI's `KSampler` implementation, so the
 same seed is not expected to produce a pixel-identical image.
 
-## Faster repeat swaps
+## Faster repeat transfers
 
 The app caches the last prompt plus its body/head references and two deterministic
 VAE reference encodings in system RAM. Both reference images, their ordering,
@@ -64,7 +69,7 @@ and the prompt are part of the cache key. Changing the seed or LoRA strengths
 does not require re-encoding unchanged references. No denoising steps are skipped.
 
 With at least 22 GiB of free VRAM at model load and a canvas up to about 1 MP,
-the default fast mode retains the swap transformer and VAE on the GPU. The text
+the default fast mode retains the image transformer and VAE on the GPU. The text
 encoder runs only when needed and returns to system RAM. Larger canvases or the
 unchecked **Keep swap model on GPU** option use component CPU offload; a busy GPU
 at startup selects slower sequential offload. On a mostly free 24 GB card, larger
@@ -72,10 +77,10 @@ at startup selects slower sequential offload. On a mostly free 24 GB card, large
 pixels versus the old 256-pixel tiles; steps, resolution and adapters are unchanged.
 
 First generation includes model loading. New references or a changed prompt are
-slower than repeated swaps using the same inputs. The result status reports total
+slower than repeated transfers using the same inputs. The result status reports total
 time, memory mode and cache reuse. Fast mode holds substantial GPU memory between
-swaps: click **Release models / free GPU memory** before running another GPU app.
-This clears memory only, never downloaded models or saved images. The next swap
+transfers: click **Release models / free GPU memory** before running another GPU app.
+This clears memory only, never downloaded models or saved images. The next transfer
 reloads the models. Restart the app to load code updates; no new model download is
 needed for this speed update.
 
@@ -91,19 +96,19 @@ At a fixed seed, cached and uncached runs of the updated build were pixel-identi
 - Windows 10/11 64-bit
 - Python 3.10 or 3.11
 - NVIDIA GPU with a recent driver; tested target is RTX 4090 24 GB
-- Roughly 60 GB free disk space during installation
+- Roughly 60 GB free disk space during setup
 - About 64 GB system RAM recommended for bf16 CPU offload
 
-The installer uses a private virtual environment inside `BFS-Swap\.venv` and
-keeps its models inside `BFS-Swap\models`.
+The source setup above uses a private virtual environment in `.venv/` and
+keeps downloaded models in `models/`.
 
 ## Model sources
 
-- `Qwen/Qwen-Image-2.1`
-- `Alissonerdx/BFS-Best-Face-Swap`
-- `Viggle/Qwen-Image-2.1-viggle-turbo`
+- [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1) — all repository model files belong in `models/Qwen-Image-2.1/`.
+- [BFS identity LoRA](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1.1_alternative_qwen_2.1.safetensors) — save as `models/loras/bfs_head_v1.1_alternative_qwen_2.1.safetensors`.
+- [Viggle Turbo six-step LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors) — save as `models/loras/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors`.
 
-The installer pins exact upstream revisions recorded on September 29, 2026.
+`download_models.py` pins exact upstream revisions recorded on September 29, 2026.
 The [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
 and [Viggle Turbo LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/LICENSE)
 use the Qwen Research License. Their materials are limited to non-commercial
