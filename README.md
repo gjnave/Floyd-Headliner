@@ -116,6 +116,8 @@ use the Qwen Research License. Their materials are limited to non-commercial
 research/evaluation unless the licensor grants a separate commercial license.
 The license for Floyd Headliner's code does not change those upstream terms.
 
+Floyd Headliner is named in honor of the legend Count Floyd
+
 ## License
 
 Floyd Headliner's own app code and documentation are available under the
