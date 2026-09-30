@@ -224,6 +224,29 @@ def painted_mask_from_editor_payload(editor, raw_input):
     return gr.skip()
 
 
+def protect_editor_preprocessing(editor):
+    """Retry incomplete cache reads at the component boundary, including Generate."""
+    original_preprocess = editor.preprocess
+
+    def preprocess(payload):
+        for attempt in range(5):
+            try:
+                return original_preprocess(payload)
+            except (OSError, SyntaxError) as error:
+                if attempt == 4:
+                    import gradio as gr
+                    raise gr.Error(
+                        "The body image or painted mask could not be read completely. "
+                        "Wait for the upload to finish and try again. If it repeats, "
+                        "re-upload the original body image and repaint the selection. "
+                        "Generation has not started; no models need reinstalling."
+                    ) from error
+                time.sleep(0.15 * 2**attempt)
+
+    editor.preprocess = preprocess
+    return editor
+
+
 def prepare_selection(body_input, selected_only=False):
     """Use the editor background, never the painted composite, as model input."""
     background = body_input.get("background") if isinstance(body_input, dict) else body_input
@@ -625,6 +648,7 @@ def build_likeness_ui(gr):
             label="1 — BODY REFERENCE (required): pose, clothes, scene",
         )
         head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity")
+    protect_editor_preprocessing(body)
     extra_prompt = gr.Textbox(
         label="Extra prompt", value="", lines=2,
         placeholder="For example: remove the hat; keep the head reference's hair.",

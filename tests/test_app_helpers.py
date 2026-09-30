@@ -15,6 +15,27 @@ SPEC.loader.exec_module(APP)
 
 
 class AppHelperTests(unittest.TestCase):
+    def test_generate_editor_preprocessing_retries_incomplete_png(self):
+        expected = {"background": Image.new("RGBA", (20, 20)), "layers": []}
+        original = Mock(side_effect=[OSError("image file is truncated"),
+                                    SyntaxError("broken PNG file"), expected])
+        editor = SimpleNamespace(preprocess=original)
+        APP.protect_editor_preprocessing(editor)
+        payload = object()
+        with patch.object(APP.time, "sleep") as sleep:
+            self.assertIs(editor.preprocess(payload), expected)
+        self.assertEqual(original.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_generate_editor_preprocessing_rejects_corrupt_image(self):
+        import gradio as gr
+        editor = SimpleNamespace(preprocess=Mock(side_effect=OSError("image file is truncated")))
+        APP.protect_editor_preprocessing(editor)
+        with patch.object(APP.time, "sleep"), self.assertRaises(gr.Error) as error:
+            editor.preprocess(object())
+        self.assertIn("re-upload", str(error.exception))
+        self.assertEqual(editor.preprocess.__closure__[0].cell_contents.call_count, 5)
+
     def check_startup(self, profiles, current, answer=None, requested=None):
         profile_file = Mock()
         with patch.object(APP, "available_startup_profiles", return_value=profiles), \
