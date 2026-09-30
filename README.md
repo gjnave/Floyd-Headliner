@@ -1,13 +1,29 @@
-# Get Going Fast · BFS Character Swap
+![Floyd Headliner — Likeness Transfer](assets/floydheadliner.png)
 
-Get Going Fast packages this local Windows head-swap app with a branded interface
-and double-click launcher. It recreates the active image-edit path from
+# Floyd Headliner — Likeness Transfer
+
+## Get going fast
+
+### [Quick Setup Helper → GetGoingFast.pro/tools/floydheadliner](https://getgoingfast.pro/tools/floydheadliner)
+
+The guided setup page is being prepared. Bookmark it for the fastest way to get
+Floyd Headliner installed and running. For walkthroughs and updates, visit
+[The AI Hobby Guy on YouTube](https://youtube.com/@theaihobbyguy).
+
+Floyd Headliner is a local Windows head-swap app: provide a **body reference**
+for pose, clothing, and scene, then a **head reference** for face, hair, and
+likeness. Get Going Fast packages the app with a branded interface and
+double-click launcher. It recreates the active image-edit path from
 `Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
 It does not install, import, launch, call, or package ComfyUI.
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
 
 ## Install and run
+
+The installer and launcher BAT files are not yet uploaded to this source
+repository. The [Quick Setup Helper](https://getgoingfast.pro/tools/floydheadliner)
+will provide the guided package. Once you have that package:
 
 1. Double-click `INSTALL-BFS-SWAP.bat`.
 2. Allow the approximately 35 GB (32.4 GiB) model download to complete. Re-running the
@@ -19,7 +35,8 @@ publishers; Get Going Fast does not claim ownership of those models.
 5. Click **Swap Head**.
    You can also press **Ctrl+Enter** while using the app.
 
-Generated PNG files are saved under `BFS-Swap\outputs`.
+Generated PNG files are saved under `BFS-Swap\outputs` in the packaged app, or
+`outputs/` when running the source from this repository root.
 The distribution ZIP contains the installer and app source only. The installer
 downloads the base model and both LoRAs; the ZIP does not contain model weights,
 the private Python environment, or generated images.
@@ -87,4 +104,15 @@ keeps its models inside `BFS-Swap\models`.
 - `Viggle/Qwen-Image-2.1-viggle-turbo`
 
 The installer pins exact upstream revisions recorded on September 29, 2026.
-Review each upstream model license before redistribution or commercial use.
+The [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
+and [Viggle Turbo LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/LICENSE)
+use the Qwen Research License. Their materials are limited to non-commercial
+research/evaluation unless the licensor grants a separate commercial license.
+The license for Floyd Headliner's code does not change those upstream terms.
+
+## License
+
+Floyd Headliner's own app code and documentation are available under the
+[GNU General Public License, version 3 or later](LICENSE); the complete GPLv3
+text is in [COPYING](COPYING). Third-party models, adapters, and dependencies
+remain under their respective licenses.

@@ -1,0 +1,12 @@
+# Keep downloaded model weights, local environments, and generated images out of Git.
+models/*
+!models/models-download-here.nfo
+outputs/*
+!outputs/outputs-are-here.nfo
+.venv/
+__pycache__/
+*.py[cod]
+*.safetensors
+*.ckpt
+*.pt
+*.pth
