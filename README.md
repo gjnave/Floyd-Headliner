@@ -12,9 +12,8 @@ For walkthroughs and updates, visit
 Floyd Headliner is a local Windows likeness-transfer app: provide a **body reference**
 for pose, clothing, and scene, then a **head reference** for face, hair, and
 likeness. It recreates the active image-edit path from
-`Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app
-.
-It is standalone and does not require ComfyUI
+`Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
+It is standalone and does not require ComfyUI.
 
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
@@ -25,11 +24,12 @@ For guided setup, use the [Quick Setup Helper](https://getgoingfast.pro/tools/fl
 at Get Going Fast. This public repository contains the app source; the
 one-click setup package is a separate Get Going Fast member offering.
 
-To set up this source checkout yourself on Windows, open **Command Prompt** in
-the repository root and run:
+For manual source setup, install [uv](https://docs.astral.sh/uv/getting-started/installation/),
+then open **Command Prompt** in the directory where you want the repository:
 
 ```bat
 git clone https://codeberg.org/Cognibuild/Floyd-Headliner
+cd Floyd-Headliner
 uv venv --python 3.11 .venv
 uv pip install --python .venv\Scripts\python.exe --upgrade pip setuptools wheel
 uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu130
@@ -43,7 +43,7 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 
 In the app, add the body/base image on the left and the head reference in the
 middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
-**Swap Head**, or press **Ctrl+Enter**. Generated PNG files are saved in
+**Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
 ## What is reproduced
@@ -71,7 +71,7 @@ does not require re-encoding unchanged references. No denoising steps are skippe
 With at least 22 GiB of free VRAM at model load and a canvas up to about 1 MP,
 the default fast mode retains the image transformer and VAE on the GPU. The text
 encoder runs only when needed and returns to system RAM. Larger canvases or the
-unchecked **Keep swap model on GPU** option use component CPU offload; a busy GPU
+unchecked **Keep model on GPU** option use component CPU offload; a busy GPU
 at startup selects slower sequential offload. On a mostly free 24 GB card, larger
 512-pixel VAE tiles reduce encoding/decoding overhead. Tiling can slightly change
 pixels versus the old 256-pixel tiles; steps, resolution and adapters are unchanged.
@@ -81,8 +81,7 @@ slower than repeated transfers using the same inputs. The result status reports 
 time, memory mode and cache reuse. Fast mode holds substantial GPU memory between
 transfers: click **Release models / free GPU memory** before running another GPU app.
 This clears memory only, never downloaded models or saved images. The next transfer
-reloads the models. Restart the app to load code updates; no new model download is
-needed for this speed update.
+reloads the models. Restart the app to load code updates.
 
 Local RTX 4090 verification (six steps, 864 x 1248 working canvas, 1728 x 2496 PNG):
 the previous build took 32.8 seconds initially and 23.3 seconds warm. The updated
@@ -109,6 +108,12 @@ keeps downloaded models in `models/`.
 - [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1) — all repository model files belong in `models/Qwen-Image-2.1/`.
 - [BFS identity LoRA](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1.1_alternative_qwen_2.1.safetensors) — save as `models/loras/bfs_head_v1.1_alternative_qwen_2.1.safetensors`.
 - [Viggle Turbo six-step LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors) — save as `models/loras/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors`.
+
+If a pinned Hugging Face LoRA download fails, `download_models.py` tries the
+[BFS backup](https://drive.google.com/file/d/18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG/view?usp=drive_link)
+or [Viggle backup](https://drive.google.com/file/d/1VceHvGZXdu4sO2GJW5njn6ALC1EMW4XM/view?usp=drive_link)
+on Google Drive and verifies the downloaded file's SHA-256 hash before use.
+The Qwen base model has no Google Drive fallback.
 
 `download_models.py` pins exact upstream revisions recorded on September 29, 2026.
 The [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE)
