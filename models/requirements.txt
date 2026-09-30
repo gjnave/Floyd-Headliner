@@ -1,0 +1,9 @@
+git+https://github.com/huggingface/diffusers.git@fef717ffb01f407d2637584ed936c16db908587a
+transformers==5.17.0
+accelerate>=1.12.0,<2
+peft>=0.18.0,<1
+huggingface_hub[hf_xet]>=0.36.0,<2
+safetensors>=0.6.2,<1
+pillow>=11.3.0,<13
+gradio>=5.49.0,<7
+sentencepiece>=0.2.1,<1
