@@ -6,15 +6,16 @@
 
 ### [Quick Setup Helper → GetGoingFast.pro/tools/floydheadliner](https://getgoingfast.pro/tools/floydheadliner)
 
-The guided setup page is being prepared. Bookmark it for the fastest way to get
-Floyd Headliner installed and running. For walkthroughs and updates, visit
+For walkthroughs and updates, visit
 [The AI Hobby Guy on YouTube](https://youtube.com/@theaihobbyguy).
 
 Floyd Headliner is a local Windows likeness-transfer app: provide a **body reference**
 for pose, clothing, and scene, then a **head reference** for face, hair, and
 likeness. It recreates the active image-edit path from
-`Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
-It does not install, import, launch, call, or package ComfyUI.
+`Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app
+.
+It is standalone and does not require ComfyUI
+
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
 
@@ -35,11 +36,6 @@ py -3.11 -m venv .venv
 .venv\Scripts\python.exe download_models.py
 .venv\Scripts\python.exe app.py
 ```
-
-The model downloader retrieves the approximately 35 GB base model and two
-LoRAs from the original publishers. You can rerun it to resume incomplete
-downloads. If you prefer to obtain the files yourself, see [Model sources](#model-sources)
-for direct links and the expected folder layout.
 
 In the app, add the body/base image on the left and the head reference in the
 middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
