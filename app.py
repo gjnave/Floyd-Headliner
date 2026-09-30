@@ -200,6 +200,23 @@ def has_painted_mask(body_input) -> bool:
     return False
 
 
+def painted_mask_from_editor_payload(editor, raw_input):
+    """Read editor changes without making a transient PNG decode a Gradio error."""
+    if raw_input is None:
+        return False
+    for attempt in range(3):
+        try:
+            payload = editor.data_model.model_validate(raw_input)
+            return has_painted_mask(editor.preprocess(payload))
+        except (OSError, SyntaxError):
+            if attempt < 2:
+                time.sleep(0.15 * (attempt + 1))
+    import gradio as gr
+
+    gr.Warning("The body image is still being prepared. Wait a moment, then paint again or re-upload it before generating.")
+    return gr.skip()
+
+
 def prepare_selection(body_input, selected_only=False):
     """Use the editor background, never the painted composite, as model input."""
     background = body_input.get("background") if isinstance(body_input, dict) else body_input
@@ -487,6 +504,12 @@ def build_likeness_ui(gr):
             label="1 — BODY REFERENCE (required): pose, clothes, scene",
         )
         head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity")
+    extra_prompt = gr.Textbox(
+        label="Extra prompt", value="", lines=2,
+        placeholder="For example: remove the hat; keep the head reference's hair.",
+        info="Added to the end of the likeness instruction in Advanced settings.",
+    )
+    generate = gr.Button("Transfer likeness · Ctrl+Enter", variant="primary", elem_id="ggf-swap-button")
     output = gr.ImageSlider(
         type="pil", format="png", interactive=False,
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
@@ -499,11 +522,10 @@ def build_likeness_ui(gr):
         elem_classes="ggf-guide",
     )
     feather = gr.Slider(0, 32, value=8, step=1, label="Selection edge softness (original-image pixels)")
-    body.change(fn=has_painted_mask, inputs=[body], outputs=[selected_only], show_progress="hidden")
-    extra_prompt = gr.Textbox(
-        label="Extra prompt", value="", lines=2,
-        placeholder="For example: remove the hat; keep the head reference's hair.",
-        info="Added to the end of the likeness instruction in Advanced settings.",
+    body.change(
+        fn=lambda raw: painted_mask_from_editor_payload(body, raw),
+        inputs=[body], outputs=[selected_only], preprocess=False,
+        trigger_mode="always_last", show_progress="hidden",
     )
     with gr.Accordion("Advanced likeness settings", open=False):
         prompt = gr.Textbox(label="Likeness instruction (keep <image1> and <image2>)", value=DEFAULT_PROMPT, lines=5)
@@ -519,7 +541,6 @@ def build_likeness_ui(gr):
         keep_on_gpu = gr.Checkbox(True, label="Keep model on GPU for faster repeat transfers (24 GB GPU, up to about 1 MP)")
         gr.Markdown("Unchanged references and prompt are cached in RAM. Changing either image or the prompt "
                     "automatically re-encodes it. Fast mode retains GPU memory; release models before using another GPU app.")
-    generate = gr.Button("Transfer likeness · Ctrl+Enter", variant="primary", elem_id="ggf-swap-button")
     status = gr.Markdown(elem_classes="ggf-status")
     saved_file = gr.File(label="Saved PNG", elem_classes="ggf-download")
     used_seed = gr.Textbox(label="Used seed", interactive=False)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -20,9 +21,70 @@ TURBO_REPO = "Viggle/Qwen-Image-2.1-viggle-turbo"
 TURBO_REVISION = "bb26a0f38e5fe6c124aaccc9187a87eed5d9ed13"
 TURBO_FILE = "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
 
+# Public Google Drive copies are used only if a pinned upstream LoRA is unavailable.
+# Hashes were recorded from the existing, working local model files.
+LORAS = (
+    (BFS_REPO, BFS_REVISION, BFS_FILE, "18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG", 318821008,
+     "c5332bbc2f826856e7a09bce9740e97d39514b849368212e1f2c3c2c2d81c217"),
+    (TURBO_REPO, TURBO_REVISION, TURBO_FILE, "1VceHvGZXdu4sO2GJW5njn6ALC1EMW4XM", 1359147904,
+     "2a0148f5c73abbed5f97da5ea356e439318aadb281d01fce4af39cdf43728803"),
+)
+
 
 def gib(value: int) -> float:
     return value / (1024**3)
+
+
+def validate_lora(path: Path, size: int, sha256: str) -> bool:
+    if not path.is_file() or path.stat().st_size != size:
+        return False
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == sha256
+
+
+def download_lora(repo: str, revision: str, filename: str, drive_id: str,
+                  size: int, sha256: str) -> None:
+    target = LORA_DIR / filename
+    if target.exists():
+        if validate_lora(target, size, sha256):
+            print(f"Verified existing LoRA: {filename}")
+            return
+        raise RuntimeError(f"Existing LoRA is incomplete or has the wrong checksum; preserved: {target}")
+
+    staging = LORA_DIR / ".downloads"
+    staging.mkdir(parents=True, exist_ok=True)
+    primary_path = staging / (filename + ".huggingface.part")
+    try:
+        print(f"Trying pinned Hugging Face revision for {filename}...")
+        cached = hf_hub_download(repo_id=repo, filename=filename, revision=revision)
+        if primary_path.exists():
+            raise RuntimeError(f"Previous staging file must be checked manually: {primary_path}")
+        shutil.copyfile(cached, primary_path)
+        if not validate_lora(primary_path, size, sha256):
+            raise RuntimeError("Hugging Face LoRA did not match the expected size and SHA-256")
+        primary_path.rename(target)
+        print(f"Installed from Hugging Face: {filename}")
+        return
+    except Exception as upstream_error:
+        print(f"Pinned Hugging Face source unavailable: {upstream_error}")
+
+    import gdown
+
+    backup_path = staging / (filename + ".google-drive.part")
+    print(f"Trying Google Drive backup for {filename}...")
+    try:
+        gdown.download(id=drive_id, output=str(backup_path), quiet=False, resume=True)
+    except Exception as backup_error:
+        raise RuntimeError(f"Google Drive backup failed for {filename}: {backup_error}") from backup_error
+    if not validate_lora(backup_path, size, sha256):
+        raise RuntimeError(f"Google Drive backup checksum failed; download preserved for inspection: {backup_path}")
+    if target.exists():
+        raise RuntimeError(f"LoRA appeared while downloading; refusing to overwrite: {target}")
+    backup_path.rename(target)
+    print(f"Installed verified Google Drive backup: {filename}")
 
 
 def main() -> int:
@@ -44,21 +106,9 @@ def main() -> int:
         max_workers=4,
     )
 
-    print("\n[2/3] BFS v1.1 alternative LoRA")
-    hf_hub_download(
-        repo_id=BFS_REPO,
-        filename=BFS_FILE,
-        revision=BFS_REVISION,
-        local_dir=LORA_DIR,
-    )
-
-    print("\n[3/3] Viggle six-step LoRA")
-    hf_hub_download(
-        repo_id=TURBO_REPO,
-        filename=TURBO_FILE,
-        revision=TURBO_REVISION,
-        local_dir=LORA_DIR,
-    )
+    for index, lora in enumerate(LORAS, start=2):
+        print(f"\n[{index}/3] {lora[2]}")
+        download_lora(*lora)
 
     required = [BASE_MODEL_DIR / "model_index.json", LORA_DIR / BFS_FILE, LORA_DIR / TURBO_FILE]
     missing = [path for path in required if not path.is_file()]

@@ -1,7 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 from PIL import Image
@@ -26,6 +26,34 @@ class AppHelperTests(unittest.TestCase):
         self.assertTrue(APP.has_painted_mask({"background": background, "layers": [painted]}))
         painted.putpixel((12, 15), (0, 0, 0, 0))
         self.assertFalse(APP.has_painted_mask({"background": background, "layers": [painted]}))
+
+    def test_mask_checkbox_retries_transient_editor_png_error(self):
+        background = Image.new("RGBA", (20, 20), "blue")
+        painted = Image.new("RGBA", background.size)
+        painted.putpixel((4, 5), (245, 185, 66, 255))
+        editor = SimpleNamespace(
+            data_model=SimpleNamespace(model_validate=lambda value: value),
+            preprocess=Mock(side_effect=[
+                SyntaxError("broken PNG file"),
+                OSError("image file is truncated"),
+                {"background": background, "layers": [painted]},
+            ]),
+        )
+        with patch.object(APP.time, "sleep") as sleep:
+            self.assertTrue(APP.painted_mask_from_editor_payload(editor, {"background": "cached"}))
+        self.assertEqual(editor.preprocess.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_mask_checkbox_keeps_previous_value_after_persistent_png_error(self):
+        editor = SimpleNamespace(
+            data_model=SimpleNamespace(model_validate=lambda value: value),
+            preprocess=Mock(side_effect=OSError("image file is truncated")),
+        )
+        marker = object()
+        with patch.object(APP.time, "sleep"), patch("gradio.Warning") as warning, patch("gradio.skip", return_value=marker):
+            self.assertIs(APP.painted_mask_from_editor_payload(editor, {"background": "cached"}), marker)
+        self.assertEqual(editor.preprocess.call_count, 3)
+        warning.assert_called_once()
 
     def test_editor_ignores_paint_for_reference(self):
         body = Image.new("RGBA", (100, 80), "blue")
