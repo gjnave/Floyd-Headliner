@@ -37,6 +37,9 @@ py -3.11 -m venv .venv
 .venv\Scripts\python.exe app.py
 ```
 
+![Floyd Headliner — Likeness Transfer](assets/fh2.png)
+
+
 In the app, add the body/base image on the left and the head reference in the
 middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 **Swap Head**, or press **Ctrl+Enter**. Generated PNG files are saved in
@@ -86,6 +89,8 @@ build took 22.9 seconds for initial conditioning and 8.7-8.8 seconds for repeate
 inputs. A changed head reference took 20.8 seconds. These measurements exclude
 model loading, include saving the PNG, and are not a guarantee for every image.
 At a fixed seed, cached and uncached runs of the updated build were pixel-identical.
+
+![Floyd Headliner — Likeness Transfer](assets/fh3.png)
 
 ## Requirements
 
