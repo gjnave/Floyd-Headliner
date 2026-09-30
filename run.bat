@@ -2,8 +2,6 @@
 setlocal EnableExtensions
 title Floyd Headliner
 cd /d "%~dp0"
-IF EXIST "\assets\about.nfo" TYPE "\assets\about.nfo"
-
 if exist "%~dp0assets\about.nfo" type "%~dp0assets\about.nfo"
 
 if not exist ".venv\Scripts\python.exe" (
