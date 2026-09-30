@@ -1,0 +1,24 @@
+<section class="paint-editor" aria-label="Inpaint drawing editor">
+  <div class="paint-toolbar" role="toolbar" aria-label="Drawing tools">
+    <label class="upload-button">Upload image<input class="paint-upload" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload inpaint image"></label>
+    <button type="button" data-tool="add" aria-pressed="true" title="Sketch the shape of something to add">+ Add</button>
+    <button type="button" data-tool="remove" aria-pressed="false" title="Paint the entire object to remove">− Remove</button>
+    <button type="button" data-tool="color" aria-pressed="false" title="Paint a desired color onto a surface">Color</button>
+    <input class="paint-color" type="color" value="#42a5f5" aria-label="Brush color">
+    <button type="button" data-tool="erase" aria-pressed="false" title="Erase brush marks, not the photograph">Eraser</button>
+    <label class="size-label">Size <input class="paint-size" type="range" min="2" max="150" value="16" aria-label="Brush size"><output class="size-value">16</output></label>
+  </div>
+  <div class="paint-toolbar secondary">
+    <button type="button" class="paint-undo" disabled>Undo</button>
+    <button type="button" class="paint-redo" disabled>Redo</button>
+    <button type="button" class="paint-clear">Clear marks</button>
+    <button type="button" class="paint-hide" aria-pressed="false">Hide marks</button>
+    <label>Zoom <select class="paint-zoom" aria-label="Canvas zoom"><option value="1">Fit</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select></label>
+    <span class="paint-info" role="status" aria-live="polite">Upload or drop an image to begin.</span>
+  </div>
+  <div class="paint-viewport" tabindex="0" aria-label="Drawing canvas. Use the mouse or a pen to paint; scroll when zoomed.">
+    <div class="paint-empty">Drop your image here<br><small>Sketch an idea. Remove an object. Change a color.</small></div>
+    <canvas class="paint-canvas" aria-label="Inpaint drawing canvas" hidden></canvas>
+  </div>
+  <p class="paint-hint">Green = add a shape · Pink = remove an object · Color = recolor · Eraser only removes your marks</p>
+</section>

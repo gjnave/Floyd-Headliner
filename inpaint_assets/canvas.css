@@ -1,0 +1,24 @@
+.paint-editor {background:#111c2f; border:1px solid #334a6b; border-radius:12px; overflow:hidden; color:#e8eef9; font-family:inherit;}
+.paint-toolbar {display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:12px; border-bottom:1px solid #2a3b56;}
+.paint-toolbar button,.upload-button,.paint-toolbar select {background:#182b45; color:#e8eef9; border:1px solid #4b6588; border-radius:7px; padding:8px 12px; font:inherit; cursor:pointer;}
+.paint-toolbar button:hover,.upload-button:hover {background:#254566;}
+.paint-toolbar button[aria-pressed="true"] {background:#f5b942; color:#091425; border-color:#f5b942; font-weight:700;}
+.paint-toolbar button:disabled {opacity:.4; cursor:default;}
+.paint-toolbar button:focus-visible,.paint-viewport:focus-visible {outline:2px solid #8fc2ff; outline-offset:2px;}
+.upload-button {background:#f5b942; color:#091425; font-weight:700; position:relative;}
+.paint-upload {position:absolute; width:1px; height:1px; opacity:0; overflow:hidden;}
+.paint-toolbar label {display:flex; align-items:center; gap:8px; margin:0; color:#e8eef9;}
+.paint-toolbar .upload-button {color:#091425;}
+.paint-toolbar input[type="color"] {width:36px; height:36px; padding:2px; border:1px solid #4b6588; border-radius:6px; background:#091425; cursor:pointer;}
+.paint-size {width:110px; accent-color:#f5b942;}
+.size-value {min-width:26px; color:#f5b942;}
+.secondary {padding-top:8px; padding-bottom:8px;}
+.secondary button,.secondary select {font-size:13px; padding:6px 10px;}
+.paint-info {color:#bdcce1; font-size:13px; margin-left:auto;}
+.paint-viewport {height:550px; overflow:auto; position:relative; background:#08111f; overscroll-behavior:contain;}
+.paint-canvas {display:block; touch-action:none; cursor:crosshair; margin:auto;}
+.paint-canvas[hidden] {display:none;}
+.paint-empty {position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#dce8f7; font-size:20px; pointer-events:none;}
+.paint-empty small {font-size:14px; color:#9db0cc; margin-top:8px; text-align:center;}
+.paint-hint {font-size:12px; color:#bdcce1; padding:8px 12px; margin:0;}
+@media(max-width:680px) {.paint-viewport {height:420px;} .paint-toolbar {gap:6px;padding:8px;} .paint-info {width:100%;} .paint-toolbar button {padding:8px;}}
