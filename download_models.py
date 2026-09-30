@@ -22,7 +22,7 @@ TURBO_REVISION = "bb26a0f38e5fe6c124aaccc9187a87eed5d9ed13"
 TURBO_FILE = "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
 
 # Public Google Drive copies are used only if a pinned upstream LoRA is unavailable.
-# Hashes were recorded from the existing, working local model files.
+# Both Drive copies were downloaded and matched the working local model SHA-256 hashes.
 LORAS = (
     (BFS_REPO, BFS_REVISION, BFS_FILE, "18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG", 318821008,
      "c5332bbc2f826856e7a09bce9740e97d39514b849368212e1f2c3c2c2d81c217"),
