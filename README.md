@@ -38,6 +38,24 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe app.py
 ```
 
+For the lower-VRAM mode, install `bitsandbytes==0.50.2` into the private
+environment and select the smaller six-step Viggle adapter before starting:
+
+```bat
+.venv\Scripts\python.exe -m pip install bitsandbytes==0.50.2
+.venv\Scripts\python.exe download_models.py --profile low-vram
+.venv\Scripts\python.exe app.py
+```
+
+The [Quick Setup Helper](https://getgoingfast.pro/tools/floydheadliner) offers
+this choice during installation. The low-VRAM mode quantizes the existing Qwen
+transformer and text encoder to 4-bit NF4 at load time, uses component CPU
+offload and Viggle's rank-128 six-step LoRA. It still downloads the same roughly
+35 GB Qwen base checkpoint. Switching profiles preserves already downloaded
+model files; `download_models.py --profile standard` restores the original mode.
+The current low-VRAM profile is aimed at approximately 16 GB GPUs; 12 GB cards
+have not been verified and may run out of memory. Keep other GPU apps closed.
+
 ![Floyd Headliner — Likeness Transfer](assets/fh2.png)
 
 
@@ -56,6 +74,10 @@ middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 - About a 1 MP ratio-preserving working canvas, rounded to multiples of 32
 - 2x Lanczos output scaling
 - Automatic GPU residency or CPU/GPU offload according to available VRAM
+
+The optional low-VRAM profile changes the precision and uses Viggle's 680 MB
+rank-128 cut instead of the 1.36 GB rank-256 adapter. It is not expected to
+produce identical pixels to the standard profile.
 
 Diffusers uses Qwen Image 2.1's official FlowMatch Euler scheduler. It is the
 standalone pipeline equivalent, not ComfyUI's `KSampler` implementation, so the
@@ -90,6 +112,14 @@ inputs. A changed head reference took 20.8 seconds. These measurements exclude
 model loading, include saving the PNG, and are not a guarantee for every image.
 At a fixed seed, cached and uncached runs of the updated build were pixel-identical.
 
+Low-VRAM smoke test (RTX 4090, two synthetic references, 1024 × 1024 canvas,
+six steps): standard BF16/rank-256 loaded in 12.2 s and generated in 22.8 s
+first / 10.1 s with cached references, peaking at 22.6 GiB reserved. NF4/rank-128
+loaded in 25.2 s and generated in 14.2 s first / 9.7 s cached, peaking at
+13.1 GiB reserved. The low-VRAM run also passed with a 16 GiB PyTorch allocation
+cap. These are one-machine smoke measurements, exclude saving a PNG, and are
+not a guarantee on an actual 16 GB GPU or with different images.
+
 ![Floyd Headliner — Likeness Transfer](assets/fh3.png)
 
 ## Requirements
@@ -108,6 +138,7 @@ keeps downloaded models in `models/`.
 - [Qwen Image 2.1 base model](https://huggingface.co/Qwen/Qwen-Image-2.1) — all repository model files belong in `models/Qwen-Image-2.1/`.
 - [BFS identity LoRA](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1.1_alternative_qwen_2.1.safetensors) — save as `models/loras/bfs_head_v1.1_alternative_qwen_2.1.safetensors`.
 - [Viggle Turbo six-step LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors) — save as `models/loras/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors`.
+- [Viggle Turbo rank-128 six-step LoRA](https://huggingface.co/Viggle/Qwen-Image-2.1-viggle-turbo/blob/main/Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors) — selected only by the low-VRAM profile.
 
 If a pinned Hugging Face LoRA download fails, `download_models.py` tries the
 [BFS backup](https://drive.google.com/file/d/18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG/view?usp=drive_link)

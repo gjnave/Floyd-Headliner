@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import shutil
 from pathlib import Path
@@ -20,15 +21,18 @@ BFS_FILE = "bfs_head_v1.1_alternative_qwen_2.1.safetensors"
 TURBO_REPO = "Viggle/Qwen-Image-2.1-viggle-turbo"
 TURBO_REVISION = "bb26a0f38e5fe6c124aaccc9187a87eed5d9ed13"
 TURBO_FILE = "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
+LOW_TURBO_FILE = "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors"
+PROFILE_FILE = MODELS_DIR / "install-profile.txt"
 
 # Public Google Drive copies are used only if a pinned upstream LoRA is unavailable.
 # Both Drive copies were downloaded and matched the working local model SHA-256 hashes.
-LORAS = (
-    (BFS_REPO, BFS_REVISION, BFS_FILE, "18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG", 318821008,
-     "c5332bbc2f826856e7a09bce9740e97d39514b849368212e1f2c3c2c2d81c217"),
-    (TURBO_REPO, TURBO_REVISION, TURBO_FILE, "1VceHvGZXdu4sO2GJW5njn6ALC1EMW4XM", 1359147904,
-     "2a0148f5c73abbed5f97da5ea356e439318aadb281d01fce4af39cdf43728803"),
-)
+BFS_LORA = (BFS_REPO, BFS_REVISION, BFS_FILE, "18ZKkYWDGzIWrFrrlYJrK--K7_b1wJZdG", 318821008,
+            "c5332bbc2f826856e7a09bce9740e97d39514b849368212e1f2c3c2c2d81c217")
+STANDARD_TURBO_LORA = (TURBO_REPO, TURBO_REVISION, TURBO_FILE, "1VceHvGZXdu4sO2GJW5njn6ALC1EMW4XM", 1359147904,
+                       "2a0148f5c73abbed5f97da5ea356e439318aadb281d01fce4af39cdf43728803")
+# Publisher's rank-128 cut uses the same six-step schedule as the rank-256 adapter.
+LOW_TURBO_LORA = (TURBO_REPO, TURBO_REVISION, LOW_TURBO_FILE, None, 679604800,
+                  "bafb91d0047df3f9b8a5a850b0c967f051164314d8aad778dfa34d9c24ec345b")
 
 
 def gib(value: int) -> float:
@@ -45,7 +49,7 @@ def validate_lora(path: Path, size: int, sha256: str) -> bool:
     return digest.hexdigest() == sha256
 
 
-def download_lora(repo: str, revision: str, filename: str, drive_id: str,
+def download_lora(repo: str, revision: str, filename: str, drive_id: str | None,
                   size: int, sha256: str) -> None:
     target = LORA_DIR / filename
     if target.exists():
@@ -70,6 +74,8 @@ def download_lora(repo: str, revision: str, filename: str, drive_id: str,
         return
     except Exception as upstream_error:
         print(f"Pinned Hugging Face source unavailable: {upstream_error}")
+        if drive_id is None:
+            raise RuntimeError(f"No verified backup exists for {filename}; existing files were preserved.") from upstream_error
 
     import gdown
 
@@ -88,6 +94,16 @@ def download_lora(repo: str, revision: str, filename: str, drive_id: str,
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Download Floyd Headliner models")
+    parser.add_argument("--profile", choices=("standard", "low-vram", "current"), default="current")
+    args = parser.parse_args()
+    profile = args.profile
+    if profile == "current":
+        profile = PROFILE_FILE.read_text(encoding="utf-8").strip() if PROFILE_FILE.is_file() else "standard"
+    if profile not in {"standard", "low-vram"}:
+        raise RuntimeError(f"Invalid installed model profile: {profile!r}")
+    selected_loras = (BFS_LORA, LOW_TURBO_LORA if profile == "low-vram" else STANDARD_TURBO_LORA)
+
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     LORA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -106,16 +122,17 @@ def main() -> int:
         max_workers=4,
     )
 
-    for index, lora in enumerate(LORAS, start=2):
+    for index, lora in enumerate(selected_loras, start=2):
         print(f"\n[{index}/3] {lora[2]}")
         download_lora(*lora)
 
-    required = [BASE_MODEL_DIR / "model_index.json", LORA_DIR / BFS_FILE, LORA_DIR / TURBO_FILE]
+    required = [BASE_MODEL_DIR / "model_index.json", *(LORA_DIR / lora[2] for lora in selected_loras)]
     missing = [path for path in required if not path.is_file()]
     if missing:
         raise RuntimeError("Download finished with missing files: " + ", ".join(map(str, missing)))
 
-    print("\nAll model files are installed.")
+    PROFILE_FILE.write_text(profile + "\n", encoding="utf-8")
+    print(f"\nAll {profile} model files are installed. Existing files in the other profile were preserved.")
     return 0
 
 

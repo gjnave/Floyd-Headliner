@@ -29,6 +29,8 @@ OUTPUT_DIR = APP_DIR / "outputs"
 BASE_MODEL_MARKER = BASE_MODEL_DIR / "model_index.json"
 BFS_LORA = LORA_DIR / "bfs_head_v1.1_alternative_qwen_2.1.safetensors"
 TURBO_LORA = LORA_DIR / "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
+LOW_TURBO_LORA = LORA_DIR / "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors"
+PROFILE_FILE = MODELS_DIR / "install-profile.txt"
 
 DEFAULT_PROMPT = (
     "head_swap: start with <image1> as the base image, keeping its lighting, "
@@ -261,8 +263,24 @@ def run_swap_ui(*args):
     return (original, result), path, status, str(used_seed)
 
 
+def model_profile() -> str:
+    import os
+
+    value = os.environ.get("FLOYD_HEADLINER_PROFILE")
+    if value is None and PROFILE_FILE.is_file():
+        value = PROFILE_FILE.read_text(encoding="utf-8").strip()
+    value = value or "standard"
+    if value not in {"standard", "low-vram"}:
+        raise RuntimeError(f"Invalid model profile {value!r}; expected standard or low-vram.")
+    return value
+
+
+def selected_turbo_lora() -> Path:
+    return LOW_TURBO_LORA if model_profile() == "low-vram" else TURBO_LORA
+
+
 def missing_model_files() -> list[Path]:
-    required = [BASE_MODEL_MARKER, BFS_LORA, TURBO_LORA]
+    required = [BASE_MODEL_MARKER, BFS_LORA, selected_turbo_lora()]
     return [path for path in required if not path.is_file()]
 
 
@@ -314,7 +332,7 @@ def _load_pipeline():
         if missing:
             names = "\n".join(f"- {path}" for path in missing)
             raise RuntimeError(
-                "Required model files are missing. Run INSTALL-BFS-SWAP.bat first:\n" + names
+                "Required model files are missing. Run 1-INSTALL-Floyd-Headliner.bat first:\n" + names
             )
 
         import torch
@@ -324,12 +342,21 @@ def _load_pipeline():
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. This app requires a supported NVIDIA GPU.")
 
-        pipe = FastQwenImage21Pipeline.from_pretrained(
-            BASE_MODEL_DIR,
-            dtype=torch.bfloat16,
-            local_files_only=True,
-            low_cpu_mem_usage=True,
-        )
+        low_vram = model_profile() == "low-vram"
+        load_options = dict(dtype=torch.bfloat16, local_files_only=True, low_cpu_mem_usage=True)
+        if low_vram:
+            from diffusers.quantizers import PipelineQuantizationConfig
+
+            load_options["quantization_config"] = PipelineQuantizationConfig(
+                quant_backend="bitsandbytes_4bit",
+                quant_kwargs={
+                    "load_in_4bit": True,
+                    "bnb_4bit_quant_type": "nf4",
+                    "bnb_4bit_compute_dtype": torch.bfloat16,
+                },
+                components_to_quantize=["transformer", "text_encoder"],
+            )
+        pipe = FastQwenImage21Pipeline.from_pretrained(BASE_MODEL_DIR, **load_options)
 
         # Diffusers converts the Comfy/ai-toolkit prefix. Qwen's standalone
         # model keeps the fused [gate; up] MLP as two linear layers, so split
@@ -346,7 +373,7 @@ def _load_pipeline():
                 message=r"Already found a `peft_config` attribute.*",
                 category=UserWarning,
             )
-            pipe.load_lora_weights(TURBO_LORA, adapter_name="turbo", low_cpu_mem_usage=True)
+            pipe.load_lora_weights(selected_turbo_lora(), adapter_name="turbo", low_cpu_mem_usage=True)
         pipe.set_adapters(["bfs", "turbo"], adapter_weights=[1.0, 1.0])
 
         free_vram = global_free_vram_bytes(torch)
@@ -363,8 +390,11 @@ def _load_pipeline():
 
         # Keep only the swap transformer/VAE resident on an otherwise free
         # 24 GB card. The larger text encoder always returns to system RAM.
-        _RESIDENT_ALLOWED = free_vram >= 22 * 1024**3
-        if _RESIDENT_ALLOWED:
+        _RESIDENT_ALLOWED = not low_vram and free_vram >= 22 * 1024**3
+        if low_vram:
+            pipe.enable_model_cpu_offload(gpu_id=0)
+            _OFFLOAD_MODE = "low-VRAM NF4 + component CPU offload"
+        elif _RESIDENT_ALLOWED:
             pipe.enable_fast_residency()
             _OFFLOAD_MODE = "fast GPU residency"
         elif free_vram >= 20 * 1024**3:
@@ -538,7 +568,14 @@ def build_likeness_ui(gr):
             turbo_strength = gr.Slider(0.0, 1.25, value=1.0, step=0.05, label="Viggle turbo LoRA strength")
             working_mp = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="Working megapixels")
             upscale = gr.Radio([1, 2], value=2, label="Lanczos output upscale")
-        keep_on_gpu = gr.Checkbox(True, label="Keep model on GPU for faster repeat transfers (24 GB GPU, up to about 1 MP)")
+        if model_profile() == "low-vram":
+            keep_on_gpu = gr.Checkbox(
+                False,
+                label="Low-VRAM mode: automatic component offload (GPU residency disabled)",
+                interactive=False,
+            )
+        else:
+            keep_on_gpu = gr.Checkbox(True, label="Keep model on GPU for faster repeat transfers (24 GB GPU, up to about 1 MP)")
         gr.Markdown("Unchanged references and prompt are cached in RAM. Changing either image or the prompt "
                     "automatically re-encodes it. Fast mode retains GPU memory; release models before using another GPU app.")
     status = gr.Markdown(elem_classes="ggf-status")
@@ -608,9 +645,14 @@ def self_check() -> int:
     print(f"Python app: OK")
     print(f"Torch: {torch.__version__}")
     print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"Model profile: {model_profile()}")
     print(f"Diffusers: {diffusers.__version__}")
     print(f"Transformers: {transformers.__version__}")
     print(f"Gradio: {gradio.__version__}")
+    if model_profile() == "low-vram":
+        import bitsandbytes
+
+        print(f"BitsAndBytes: {bitsandbytes.__version__}")
     missing = missing_model_files()
     if missing:
         print("Model install: INCOMPLETE")

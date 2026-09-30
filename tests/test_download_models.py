@@ -51,6 +51,12 @@ class DownloadModelsTests(unittest.TestCase):
                                      len(self.data), self.digest)
         self.assertFalse((self.lora_dir / "adapter.safetensors").exists())
 
+    def test_low_vram_adapter_has_no_unverified_google_backup(self):
+        with patch.object(models, "LORA_DIR", self.lora_dir), \
+             patch.object(models, "hf_hub_download", side_effect=RuntimeError("offline")):
+            with self.assertRaisesRegex(RuntimeError, "No verified backup"):
+                models.download_lora(*models.LOW_TURBO_LORA)
+
 
 if __name__ == "__main__":
     unittest.main()

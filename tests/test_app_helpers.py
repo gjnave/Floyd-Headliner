@@ -140,6 +140,12 @@ class AppHelperTests(unittest.TestCase):
         self.assertIn("<image2>", APP.DEFAULT_PROMPT)
         self.assertLess(APP.DEFAULT_PROMPT.index("<image1>"), APP.DEFAULT_PROMPT.index("<image2>"))
 
+    def test_model_profile_selects_matching_turbo_adapter(self):
+        with patch.dict("os.environ", {"FLOYD_HEADLINER_PROFILE": "low-vram"}):
+            self.assertEqual(APP.selected_turbo_lora(), APP.LOW_TURBO_LORA)
+        with patch.dict("os.environ", {"FLOYD_HEADLINER_PROFILE": "standard"}):
+            self.assertEqual(APP.selected_turbo_lora(), APP.TURBO_LORA)
+
     def test_extra_prompt_appends_without_changing_main_instruction(self):
         self.assertEqual(APP.compose_prompt(APP.DEFAULT_PROMPT, ""), APP.DEFAULT_PROMPT)
         self.assertEqual(
