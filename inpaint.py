@@ -124,7 +124,12 @@ def prepare_edit(payload, grow=24, fill_closed=True):
     return original, guide, mask, crop, modes
 
 
-def editing_prompt(instruction, modes):
+FOCUS_CHOICES = ("Default", "Person", "Objects", "Background")
+
+
+def editing_prompt(instruction, modes, focus="Default"):
+    if focus not in FOCUS_CHOICES:
+        raise ValueError("Choose a valid Inpaint focus.")
     text = (
         "Edit <image1>, the original photograph. <image2> is an annotated editing guide, "
         "not a desired output. <image3> is the edit mask: white marks the editable area, "
@@ -132,13 +137,32 @@ def editing_prompt(instruction, modes):
         "all unrelated content as <image1>. Return a finished natural image, without "
         "guide lines, colored masks, labels or annotations. "
     )
+    if focus == "Person":
+        text += ("Focus on the person within the editable area. Preserve their identity, "
+                 "face, pose, body proportions, and the surrounding scene. Keep the person "
+                 "present rather than replacing them with background. ")
+    elif focus == "Objects":
+        text += ("Focus on the painted object. Preserve people, their clothing, and "
+                 "unpainted objects in the scene. ")
+    elif focus == "Background":
+        text += ("Focus on the setting behind the subjects. Preserve people, their "
+                 "clothing, and foreground objects. Reconstruct the surrounding setting "
+                 "naturally inside the editable area. ")
     if "add" in modes:
         text += ("The bright green sketch in <image2> describes the shape and placement of "
                  "something to ADD or replace. Turn that rough drawing into a realistic "
                  "object matching the scene; do not leave green strokes. ")
     if "remove" in modes:
-        text += ("The red/pink painted regions in <image2> mark content to REMOVE. "
-                 "Remove those objects and reconstruct the natural background behind them. ")
+        text += "The red/pink painted regions in <image2> mark content to REMOVE. "
+        if focus == "Person":
+            text += ("Remove that content. When removing clothing or an accessory, replace it with natural "
+                     "clothing or accessories suitable for the scene; do not erase the "
+                     "person or fill the area with background. ")
+        elif focus == "Background":
+            text += ("Remove painted background details and reconstruct the surrounding "
+                     "setting while keeping people and foreground objects intact. ")
+        else:
+            text += "Remove those objects and reconstruct the natural background behind them. "
     if "color" in modes:
         text += ("Other painted colors in <image2> are desired color guides. Apply those "
                  "colors naturally to the corresponding surfaces, retaining texture and shading. ")
@@ -151,7 +175,7 @@ def editing_prompt(instruction, modes):
 
 
 def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixels, grow,
-                feather, fill_closed, keep_on_gpu, progress=None):
+                feather, fill_closed, keep_on_gpu, focus="Default", progress=None):
     original, guide, mask, crop, modes = prepare_edit(payload, grow, fill_closed)
     import torch
 
@@ -159,7 +183,7 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     used_seed = random.randint(0, 2**63 - 1) if randomize else int(seed)
     if not 0 <= used_seed < 2**63:
         raise ValueError("Seed must be between 0 and 9223372036854775807.")
-    prompt = editing_prompt(instruction, modes)
+    prompt = editing_prompt(instruction, modes, focus)
     started = time.perf_counter()
     if progress is not None:
         progress(.02, desc="Loading local models")
@@ -206,11 +230,13 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     return (original, result), str(filename), status, str(used_seed), result
 
 
-def suggest_prompt(runtime, payload, grow, fill_closed):
+def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
     """Reuse the installed vision-language encoder for a short Draw & Guess suggestion."""
     original, guide, mask, crop, modes = prepare_edit(payload, grow, fill_closed)
     import torch
 
+    if focus not in FOCUS_CHOICES:
+        raise ValueError("Choose a valid Inpaint focus.")
     message = (
         "These images show an original photo followed by the same photo with editing marks. "
         "Green strokes sketch an object to add; red/pink strokes mark an object to remove; "
@@ -219,7 +245,8 @@ def suggest_prompt(runtime, payload, grow, fill_closed):
         "by the sketch's shape and location, such as eyewear over eyes or a hat over a head. "
         "Write ONE short image-edit instruction "
         "describing the intended change, using concrete object names. Do not describe the "
-        "marks themselves. Do not include explanations. Active tools: " + ", ".join(modes) + "."
+        "marks themselves. Do not include explanations. Active tools: " + ", ".join(modes) +
+        ". Editing focus: " + focus + "."
     )
     images = [original.crop(crop), guide.crop(crop)]
     for img in images:
@@ -254,12 +281,18 @@ def build_inpaint_ui(gr, runtime):
     gr.Markdown("Draw an idea with **+ Add**, paint unwanted objects with **− Remove**, or brush on a **Color**. "
                 "Describe the change, or use **Guess from drawing**. Your photo stays intact outside the edit area.",
                 elem_classes="ggf-guide")
-    canvas = gr.HTML(
-        value=None, html_template=(ASSET_DIR / "canvas.html").read_text(encoding="utf-8"),
-        css_template=(ASSET_DIR / "canvas.css").read_text(encoding="utf-8"),
-        js_on_load=(ASSET_DIR / "canvas.js").read_text(encoding="utf-8"),
-        elem_id="ggf-inpaint-canvas",
-    )
+    with gr.Row():
+        canvas = gr.HTML(
+            value=None, html_template=(ASSET_DIR / "canvas.html").read_text(encoding="utf-8"),
+            css_template=(ASSET_DIR / "canvas.css").read_text(encoding="utf-8"),
+            js_on_load=(ASSET_DIR / "canvas.js").read_text(encoding="utf-8"),
+            elem_id="ggf-inpaint-canvas", scale=4, min_width=440,
+        )
+        with gr.Column(scale=1, min_width=200):
+            focus = gr.Radio(FOCUS_CHOICES, value="Default", label="Focus",
+                             info="Steers the edit inside the painted area.")
+            gr.Markdown("For clothing changes, describe the replacement in the prompt below.",
+                        elem_classes="ggf-guide")
     payload = gr.JSON(value={}, visible=False)
     instruction = gr.Textbox(label="What should change?", lines=2,
                              placeholder="Add a cowboy hat; remove the lamp; turn the coat blue…")
@@ -305,17 +338,18 @@ def build_inpaint_ui(gr, runtime):
     }"""
 
     def generate_edit(data, text, seed_value, random_seed, step_count, resolution, growth,
-                      softness, fill, resident, progress=gr.Progress()):
+                      softness, fill, resident, chosen_focus, progress=gr.Progress()):
         result = run_inpaint(runtime, data, text, seed_value, random_seed, step_count,
-                             resolution, growth, softness, fill, resident, progress=progress)
+                             resolution, growth, softness, fill, resident, chosen_focus,
+                             progress=progress)
         return (*result, gr.update(interactive=True))
 
     generate.click(generate_edit,
-                   inputs=[payload, instruction, seed, randomize, steps, megapixels, grow, feather, fill_closed, keep_gpu],
+                   inputs=[payload, instruction, seed, randomize, steps, megapixels, grow, feather, fill_closed, keep_gpu, focus],
                    outputs=[comparison, saved, status, used_seed, result_state, accept],
                    js=capture_js, concurrency_id="gpu", api_name="inpaint")
-    guess.click(lambda data, growth, fill: suggest_prompt(runtime, data, growth, fill),
-                inputs=[payload, grow, fill_closed], outputs=[instruction], js=capture_js,
+    guess.click(lambda data, growth, fill, chosen_focus: suggest_prompt(runtime, data, growth, fill, chosen_focus),
+                inputs=[payload, grow, fill_closed, focus], outputs=[instruction], js=capture_js,
                 concurrency_id="gpu", api_name="guess_inpaint_prompt")
 
     def preview_edit(data, growth, fill):

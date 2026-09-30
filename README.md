@@ -102,6 +102,13 @@ middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 **Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
+On the **Inpaint** tab, the **Focus** choices beside the image are Default,
+Person, Objects, and Background. Focus steers both **Generate edit** and
+**Guess from drawing**; it does not change the painted mask. Person focus keeps
+the subject present when removing painted clothing, but a prompt describing
+the replacement garment gives the model a clearer target. Default keeps the
+previous general editing instruction.
+
 ## What is reproduced
 
 - Qwen Image 2.1 direct Diffusers inference
