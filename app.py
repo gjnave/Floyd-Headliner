@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import os
 import random
+import socket
 import subprocess
+import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import warnings
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -143,7 +149,9 @@ body, .gradio-container {
 [data-testid="toast-body"] .toast-message-text {
     overflow-wrap: anywhere;
 }
-#ggf-swap-button { background: var(--ggf-gold) !important; color: #111827 !important; font-weight: 800 !important; }
+#ggf-swap-button, #ggf-inpaint-button { background: var(--ggf-gold) !important; color: #111827 !important; font-weight: 800 !important; }
+.tab-nav button { color: var(--ggf-ink) !important; }
+.tab-nav button.selected { color: var(--ggf-gold) !important; }
 .ggf-footer { color: var(--ggf-muted); text-align: center; margin-top: 20px; font-size: .88rem; }
 @media (max-width: 680px) { .app-shell { padding: 10px 6px 24px; } .ggf-hero { padding: 18px; } }
 """
@@ -151,7 +159,9 @@ APP_JS = """
 () => {
     document.addEventListener('keydown', (event) => {
         if (!event.ctrlKey || event.key !== 'Enter' || event.repeat) return;
-        const button = document.getElementById('ggf-swap-button');
+        const button = ['ggf-inpaint-button', 'ggf-swap-button']
+            .map(id => document.getElementById(id))
+            .find(button => button && button.getClientRects().length > 0);
         if (!button || button.disabled) return;
         event.preventDefault();
         event.stopPropagation();
@@ -346,7 +356,7 @@ def _load_pipeline():
         else:
             pipe.enable_sequential_cpu_offload(gpu_id=0)
             _OFFLOAD_MODE = "sequential CPU offload"
-        pipe.set_progress_bar_config(desc="BFS swap")
+        pipe.set_progress_bar_config(desc="Floyd Headliner")
         print(f"Offload mode: {_OFFLOAD_MODE} ({free_vram / 1024**3:.1f} GiB VRAM free at load)")
         _PIPELINE = pipe
         return _PIPELINE
@@ -463,8 +473,71 @@ def run_swap(
     return result, str(output_path), status, used_seed
 
 
+def build_likeness_ui(gr):
+    gr.Markdown(
+        "**1. BODY REFERENCE:** keeps pose, clothing, lighting, and background.  \n"
+        "**2. HEAD REFERENCE:** supplies the face, head, hair, and identity. Both images are required.",
+        elem_classes="ggf-guide",
+    )
+    selected_only = gr.Checkbox(label="Edit painted area only", value=False)
+    with gr.Row():
+        body = gr.ImageEditor(
+            type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
+            brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
+            label="1 — BODY REFERENCE (required): pose, clothes, scene",
+        )
+        head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity")
+    output = gr.ImageSlider(
+        type="pil", format="png", interactive=False,
+        label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
+    )
+    gr.Markdown(
+        "For multiple people, paint over **only the intended head**, including hair or hats to remove. "
+        "Painting enables **Edit painted area only** automatically; clearing the paint turns it off. "
+        "The app edits a crop and blends it back; unpainted pixels stay unchanged. "
+        "Paint enough room for the replacement hair. Uncheck the box to edit the whole image.",
+        elem_classes="ggf-guide",
+    )
+    feather = gr.Slider(0, 32, value=8, step=1, label="Selection edge softness (original-image pixels)")
+    body.change(fn=has_painted_mask, inputs=[body], outputs=[selected_only], show_progress="hidden")
+    extra_prompt = gr.Textbox(
+        label="Extra prompt", value="", lines=2,
+        placeholder="For example: remove the hat; keep the head reference's hair.",
+        info="Added to the end of the likeness instruction in Advanced settings.",
+    )
+    with gr.Accordion("Advanced likeness settings", open=False):
+        prompt = gr.Textbox(label="Likeness instruction (keep <image1> and <image2>)", value=DEFAULT_PROMPT, lines=5)
+        with gr.Row():
+            seed = gr.Number(label="Seed", value=42, precision=0)
+            randomize = gr.Checkbox(label="Randomize seed", value=True)
+            steps = gr.Slider(4, 40, value=6, step=1, label="Steps")
+        with gr.Row():
+            bfs_strength = gr.Slider(0.0, 1.5, value=1.0, step=0.05, label="BFS identity LoRA strength")
+            turbo_strength = gr.Slider(0.0, 1.25, value=1.0, step=0.05, label="Viggle turbo LoRA strength")
+            working_mp = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="Working megapixels")
+            upscale = gr.Radio([1, 2], value=2, label="Lanczos output upscale")
+        keep_on_gpu = gr.Checkbox(True, label="Keep model on GPU for faster repeat transfers (24 GB GPU, up to about 1 MP)")
+        gr.Markdown("Unchanged references and prompt are cached in RAM. Changing either image or the prompt "
+                    "automatically re-encodes it. Fast mode retains GPU memory; release models before using another GPU app.")
+    generate = gr.Button("Transfer likeness · Ctrl+Enter", variant="primary", elem_id="ggf-swap-button")
+    status = gr.Markdown(elem_classes="ggf-status")
+    saved_file = gr.File(label="Saved PNG", elem_classes="ggf-download")
+    used_seed = gr.Textbox(label="Used seed", interactive=False)
+    send_to_inpaint = gr.Button("Open result in Inpaint")
+    release = gr.Button("Release models / free GPU memory")
+    release.click(fn=release_models, inputs=[], outputs=[status], concurrency_id="gpu")
+    generate.click(
+        fn=run_swap_ui,
+        inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
+                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather],
+        outputs=[output, saved_file, status, used_seed], concurrency_id="gpu",
+    )
+    return output, send_to_inpaint
+
+
 def build_ui():
     import gradio as gr
+    from inpaint import build_inpaint_ui, image_data_url
 
     with gr.Blocks(title="Floyd Headliner · Get Going Fast") as demo:
         with gr.Column(elem_classes="app-shell"):
@@ -472,125 +545,30 @@ def build_ui():
                 '<header class="ggf-hero">'
                 '<div class="ggf-kicker">GET GOING FAST · LOCAL AI</div>'
                 '<h1>Floyd Headliner</h1>'
-                '<p>Head swaps with Qwen Image 2.1, the BFS identity LoRA, and Viggle Turbo.</p>'
+                '<p>Likeness Transfer &amp; Inpaint · Draw your next idea.</p>'
                 '<nav class="ggf-links" aria-label="Get Going Fast links">'
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">GetGoingFast.pro ↗</a>'
                 '<a href="https://www.youtube.com/@theaihobbyguy" target="_blank" rel="noopener noreferrer">TheAIHobbyGuy on YouTube ↗</a>'
-                '</nav>'
-                '</header>'
+                '</nav></header>'
             )
-            gr.Markdown(
-                "**1. BODY REFERENCE:** keeps pose, clothing, lighting, and background.  \n"
-                "**2. HEAD REFERENCE:** supplies the face, head, hair, and identity.  \n"
-                "Both images are required.",
-                elem_classes="ggf-guide",
-            )
-            gr.Markdown(
-                "Use only images you have the right and consent to edit. Do not use the app for impersonation or deception.",
-                elem_classes="warning",
-            )
-            selected_only = gr.Checkbox(label="Edit painted area only", value=False)
-            with gr.Row():
-                body = gr.ImageEditor(
-                    type="pil",
-                    format="png",
-                    image_mode="RGBA",
-                    transforms=(),
-                    layers=False,
-                    brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"),
-                    height=420,
-                    label="1 — BODY REFERENCE (required): pose, clothes, scene",
-                )
-                head = gr.Image(
-                    type="pil",
-                    height=420,
-                    label="2 — HEAD REFERENCE (required): face, hair, identity",
-                )
-            output = gr.ImageSlider(
-                type="pil", format="png", interactive=False,
-                label="BEFORE / AFTER — drag the divider (original left, result right)",
-                buttons=["fullscreen"],
-            )
-            gr.Markdown(
-                "For multiple people, paint over **only the intended head**, including hair or hats to remove. "
-                "Painting enables **Edit painted area only** automatically; clearing the paint turns it off. "
-                "The app edits a crop and blends it back; unpainted pixels "
-                "stay unchanged. Paint enough room for the replacement hair. This is crop-and-blend editing, "
-                "not a dedicated inpainting model. Uncheck the box to use the original whole-image swap.",
-                elem_classes="ggf-guide",
-            )
-            feather = gr.Slider(0, 32, value=8, step=1, label="Selection edge softness (original-image pixels)")
-            body.change(
-                fn=has_painted_mask,
-                inputs=[body],
-                outputs=[selected_only],
-                show_progress="hidden",
-            )
+            gr.Markdown("Use only images you have the right and consent to edit. Do not use the app for impersonation or deception.",
+                        elem_classes="warning")
+            with gr.Tabs() as tabs:
+                with gr.Tab("Likeness Transfer", id="likeness"):
+                    likeness_output, send_to_inpaint = build_likeness_ui(gr)
+                with gr.Tab("Inpaint", id="inpaint"):
+                    inpaint_canvas = build_inpaint_ui(gr, sys.modules[__name__])
 
-            extra_prompt = gr.Textbox(
-                label="Extra prompt",
-                value="",
-                placeholder="For example: remove the hat; keep the head reference's hair.",
-                info="Added to the end of the head-swap instruction in Advanced settings.",
-                lines=2,
-            )
-            with gr.Accordion("Advanced head-swap settings", open=False):
-                prompt = gr.Textbox(
-                    label="Head-swap instruction (keep <image1> and <image2>)",
-                    value=DEFAULT_PROMPT,
-                    lines=5,
-                )
-                with gr.Row():
-                    seed = gr.Number(label="Seed", value=42, precision=0)
-                    randomize = gr.Checkbox(label="Randomize seed", value=True)
-                    steps = gr.Slider(4, 40, value=6, step=1, label="Steps")
-                with gr.Row():
-                    bfs_strength = gr.Slider(0.0, 1.5, value=1.0, step=0.05, label="BFS head LoRA strength")
-                    turbo_strength = gr.Slider(0.0, 1.25, value=1.0, step=0.05, label="Viggle turbo LoRA strength")
-                    working_mp = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="Working megapixels")
-                    upscale = gr.Radio([1, 2], value=2, label="Lanczos output upscale")
-                keep_on_gpu = gr.Checkbox(
-                    value=True,
-                    label="Keep swap model on GPU for faster repeat swaps (24 GB GPU, up to about 1 MP)",
-                )
-                gr.Markdown(
-                    "Unchanged references and prompt are cached in RAM. Changing either image or the prompt "
-                    "automatically re-encodes it. Fast mode retains GPU memory; release models before using another GPU app."
-                )
+            def open_inpaint(pair):
+                if pair is None or pair[1] is None:
+                    raise ValueError("Generate a likeness result first.")
+                return {"load_image": image_data_url(pair[1])}, gr.update(selected="inpaint")
 
-            generate = gr.Button("Swap Head", variant="primary", elem_id="ggf-swap-button")
-            status = gr.Markdown(elem_classes="ggf-status")
-            saved_file = gr.File(label="Saved PNG", elem_classes="ggf-download")
-            used_seed = gr.Textbox(label="Used seed", interactive=False)
-            release = gr.Button("Release models / free GPU memory")
-            release.click(fn=release_models, inputs=[], outputs=[status], concurrency_id="gpu")
-            generate.click(
-                fn=run_swap_ui,
-                inputs=[
-                    body,
-                    head,
-                    prompt,
-                    seed,
-                    randomize,
-                    bfs_strength,
-                    turbo_strength,
-                    steps,
-                    working_mp,
-                    upscale,
-                    keep_on_gpu,
-                    extra_prompt,
-                    selected_only,
-                    feather,
-                ],
-                outputs=[output, saved_file, status, used_seed],
-                concurrency_id="gpu",
-            )
+            send_to_inpaint.click(open_inpaint, inputs=[likeness_output], outputs=[inpaint_canvas, tabs], api_name=False)
             gr.HTML(
-                '<footer class="ggf-footer">'
-                'Runs on your computer by default. Interface packaged by '
+                '<footer class="ggf-footer">Runs on your computer by default. Interface packaged by '
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">Get Going Fast</a>. '
-                'Qwen Image 2.1, BFS, and Viggle Turbo remain third-party models.'
-                '</footer>'
+                'Qwen Image 2.1, BFS, and Viggle Turbo remain third-party models.</footer>'
             )
     return demo
 
@@ -622,16 +600,45 @@ def self_check() -> int:
     return 0
 
 
+def existing_local_app(port: int) -> bool:
+    """Recognize our own Gradio server before trying to bind its port again."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/config", timeout=1.5) as response:
+            config = json.load(response)
+        return "Floyd Headliner" in config.get("title", "")
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+
+
+def local_port_in_use(port: int) -> bool:
+    with socket.socket() as connection:
+        connection.settimeout(.3)
+        return connection.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Standalone Floyd Headliner")
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", default=7860, type=int)
+    parser.add_argument("--port", default=None, type=int)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
 
     if args.self_check:
         return self_check()
+
+    if args.host in ("127.0.0.1", "localhost"):
+        ports = (args.port,) if args.port is not None else range(7860, 7870)
+        for port in ports:
+            if existing_local_app(port):
+                url = f"http://127.0.0.1:{port}"
+                print(f"Floyd Headliner is already running at {url}")
+                if not args.no_browser:
+                    webbrowser.open(url)
+                return 0
+        if args.port is not None and local_port_in_use(args.port):
+            print(f"Port {args.port} is in use by another service. Start without --port to choose a free port.")
+            return 1
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     demo = build_ui()
