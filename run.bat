@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 title Floyd Headliner
 cd /d "%~dp0"
+IF EXIST "\assets\about.nfo" TYPE "\assets\about.nfo"
 
 if not exist ".venv\Scripts\python.exe" (
     echo Floyd Headliner is not installed yet. Run the installer first.
