@@ -56,7 +56,19 @@ model files; `download_models.py --profile standard` restores the original mode.
 The current low-VRAM profile is aimed at approximately 16 GB GPUs; 12 GB cards
 have not been verified and may run out of memory. Keep other GPU apps closed.
 
-### Experimental 12 GB GPU test mode
+### Switching installed modes at startup
+
+Start the app normally. If both standard and low-VRAM model variants are
+downloaded, the console offers Standard, Low VRAM, and Experimental 12 GB.
+Press Enter to reuse your last selection. No reinstall or model download is
+needed to switch. With only one model variant installed, startup is automatic;
+a low-VRAM-only install retains its selected 16 GB or experimental 12 GB mode
+(both use the same weights). Close the running app before changing modes.
+For an explicit choice without a menu, use `app.py --profile standard`,
+`app.py --profile low-vram`, or `app.py --profile low-vram-12gb` with the private
+environment's Python. Non-interactive launches reuse the available saved mode.
+
+### Experimental 12 GB details
 
 The Quick Setup Helper now offers **3. Experimental 12 GB**. For manual source
 setup, install the bitsandbytes dependency above, then run

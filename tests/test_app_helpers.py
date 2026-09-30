@@ -15,6 +15,47 @@ SPEC.loader.exec_module(APP)
 
 
 class AppHelperTests(unittest.TestCase):
+    def check_startup(self, profiles, current, answer=None, requested=None):
+        profile_file = Mock()
+        with patch.object(APP, "available_startup_profiles", return_value=profiles), \
+             patch.object(APP, "model_profile", return_value=current), \
+             patch.object(APP, "PROFILE_FILE", profile_file), \
+             patch.dict(APP.os.environ, {}, clear=True), \
+             patch.object(APP.sys.stdin, "isatty", return_value=True), \
+             patch("importlib.util.find_spec", return_value=object()), \
+             patch("builtins.input", side_effect=answer) as prompt:
+            result = APP.select_startup_profile(requested)
+        return result, profile_file, prompt
+
+    def test_startup_menu_switches_without_install(self):
+        result, file, prompt = self.check_startup(
+            ["standard", "low-vram", "low-vram-12gb"], "standard", ["invalid", "3"])
+        self.assertTrue(result)
+        self.assertEqual(prompt.call_count, 2)
+        file.write_text.assert_called_once_with("low-vram-12gb\n", encoding="utf-8")
+
+    def test_startup_enter_keeps_last_mode(self):
+        result, file, _ = self.check_startup(
+            ["standard", "low-vram", "low-vram-12gb"], "low-vram", [""])
+        self.assertTrue(result)
+        file.write_text.assert_called_once_with("low-vram\n", encoding="utf-8")
+
+    def test_startup_single_variant_automatic(self):
+        for profiles, current, expected in [(["standard"], "low-vram", "standard"),
+                (["low-vram", "low-vram-12gb"], "low-vram-12gb", "low-vram-12gb"),
+                (["low-vram", "low-vram-12gb"], "standard", "low-vram")]:
+            result, file, prompt = self.check_startup(profiles, current)
+            self.assertTrue(result)
+            prompt.assert_not_called()
+            file.write_text.assert_called_once_with(expected + "\n", encoding="utf-8")
+
+    def test_startup_missing_or_unavailable_models_do_not_change_profile(self):
+        for profiles, requested in [([], None), (["standard"], "low-vram")]:
+            result, file, prompt = self.check_startup(profiles, "standard", requested=requested)
+            self.assertFalse(result)
+            file.write_text.assert_not_called()
+            prompt.assert_not_called()
+
     def test_twelve_gb_profile_limits_canvas_and_selects_small_adapter(self):
         with patch.object(APP, "model_profile", return_value="low-vram-12gb"):
             self.assertEqual(APP.selected_turbo_lora(), APP.LOW_TURBO_LORA)

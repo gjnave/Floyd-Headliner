@@ -284,6 +284,84 @@ def selected_turbo_lora() -> Path:
     return LOW_TURBO_LORA if model_profile() != "standard" else TURBO_LORA
 
 
+def available_startup_profiles() -> list[str]:
+    """Inspect installed weights without downloading or loading them into RAM."""
+    def present(path):
+        return path.is_file() and path.stat().st_size > 0
+
+    if not present(BASE_MODEL_MARKER) or not present(BFS_LORA):
+        return []
+    for component in ("transformer", "text_encoder", "vae"):
+        folder = BASE_MODEL_DIR / component
+        indexes = list(folder.glob("*.safetensors.index.json"))
+        if indexes:
+            try:
+                for index in indexes:
+                    shards = set(json.loads(index.read_text(encoding="utf-8"))["weight_map"].values())
+                    if not shards or not all(present(folder / shard) for shard in shards):
+                        return []
+            except (OSError, ValueError, KeyError, TypeError):
+                return []
+        elif not any(present(path) for path in folder.glob("*.safetensors")):
+            return []
+    profiles = []
+    if present(TURBO_LORA):
+        profiles.append("standard")
+    if present(LOW_TURBO_LORA):
+        profiles.extend(("low-vram", "low-vram-12gb"))
+    return profiles
+
+
+def select_startup_profile(requested=None) -> bool:
+    profiles = available_startup_profiles()
+    labels = {"standard": "Standard (24 GB)", "low-vram": "Low VRAM (16 GB target)",
+              "low-vram-12gb": "Experimental 12 GB (reduced detail)"}
+    if not profiles:
+        print("No complete model set found. Run the installer to finish the model downloads.")
+        return False
+    try:
+        current = model_profile()
+    except RuntimeError:
+        current = "standard"
+    selected = requested or os.environ.get("FLOYD_HEADLINER_PROFILE")
+    if selected is not None and selected not in profiles:
+        print(f"Models for {selected!r} are not installed. Run the installer for that mode first.")
+        return False
+    if selected is None:
+        default = current if current in profiles else profiles[0]
+        # Options 2/3 are two runtime modes of ONE downloaded model variant.
+        if "standard" not in profiles or len(profiles) == 1:
+            selected = default
+        elif not sys.stdin.isatty():
+            selected = default
+        else:
+            print("\nInstalled model modes (no downloads or reinstall required):")
+            for number, profile in enumerate(profiles, 1):
+                print(f"  {number}. {labels[profile]}" + (" [last selected]" if profile == default else ""))
+            print("Close this app before starting it again to change modes.")
+            while selected is None:
+                try:
+                    answer = input(f"Choose 1-{len(profiles)}; Enter keeps {labels[default]}: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print("\nStartup cancelled.")
+                    return False
+                if not answer:
+                    selected = default
+                elif answer.isdigit() and 1 <= int(answer) <= len(profiles):
+                    selected = profiles[int(answer) - 1]
+                else:
+                    print("Enter one of the listed numbers.")
+    if selected != "standard":
+        import importlib.util
+        if importlib.util.find_spec("bitsandbytes") is None:
+            print("Low-VRAM models are present but bitsandbytes is missing. Run the installer once for this mode.")
+            return False
+    PROFILE_FILE.write_text(selected + "\n", encoding="utf-8")
+    os.environ["FLOYD_HEADLINER_PROFILE"] = selected
+    print(f"Starting Floyd Headliner: {labels[selected]}")
+    return True
+
+
 def missing_model_files() -> list[Path]:
     required = [BASE_MODEL_MARKER, BFS_LORA, selected_turbo_lora()]
     return [path for path in required if not path.is_file()]
@@ -701,6 +779,8 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=None, type=int)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--profile", choices=("standard", "low-vram", "low-vram-12gb"),
+                        help="Start a specific installed mode without the console menu")
     args = parser.parse_args()
 
     if args.self_check:
@@ -712,6 +792,7 @@ def main() -> int:
             if existing_local_app(port):
                 url = f"http://127.0.0.1:{port}"
                 print(f"Floyd Headliner is already running at {url}")
+                print("Close the running app's console before restarting to change model modes.")
                 if not args.no_browser:
                     webbrowser.open(url)
                 return 0
@@ -719,6 +800,8 @@ def main() -> int:
             print(f"Port {args.port} is in use by another service. Start without --port to choose a free port.")
             return 1
 
+    if not select_startup_profile(args.profile):
+        return 1
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     demo = build_ui()
     demo.queue(default_concurrency_limit=1).launch(
