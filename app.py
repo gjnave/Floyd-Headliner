@@ -713,6 +713,8 @@ def build_likeness_ui(gr):
 
 def build_ui():
     import gradio as gr
+    from upload_safety import install_upload_fix
+    install_upload_fix()
     from inpaint import build_inpaint_ui, image_data_url
 
     with gr.Blocks(title="Floyd Headliner · Get Going Fast") as demo:
