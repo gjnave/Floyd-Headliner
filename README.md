@@ -29,10 +29,11 @@ To set up this source checkout yourself on Windows, open **Command Prompt** in
 the repository root and run:
 
 ```bat
-py -3.11 -m venv .venv
-.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-.venv\Scripts\python.exe -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu130
-.venv\Scripts\python.exe -m pip install -r requirements.txt
+git clone https://codeberg.org/Cognibuild/Floyd-Headliner
+uv venv --python 3.11 .venv
+uv pip install --python .venv\Scripts\python.exe --upgrade pip setuptools wheel
+uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu130
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe download_models.py
 .venv\Scripts\python.exe app.py
 ```
