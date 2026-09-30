@@ -1,0 +1,90 @@
+# Get Going Fast · BFS Character Swap
+
+Get Going Fast packages this local Windows head-swap app with a branded interface
+and double-click launcher. It recreates the active image-edit path from
+`Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
+It does not install, import, launch, call, or package ComfyUI.
+The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
+publishers; Get Going Fast does not claim ownership of those models.
+
+## Install and run
+
+1. Double-click `INSTALL-BFS-SWAP.bat`.
+2. Allow the approximately 35 GB (32.4 GiB) model download to complete. Re-running the
+   installer resumes incomplete Hugging Face downloads and preserves valid files.
+3. Double-click `START-BFS-SWAP.bat`.
+4. Add the body/base image on the left and the head reference in the middle.
+   Optionally enter a short **Extra prompt** above Advanced settings, such as
+   "Remove the hat." It is appended to the full head-swap instruction below.
+5. Click **Swap Head**.
+   You can also press **Ctrl+Enter** while using the app.
+
+Generated PNG files are saved under `BFS-Swap\outputs`.
+The distribution ZIP contains the installer and app source only. The installer
+downloads the base model and both LoRAs; the ZIP does not contain model weights,
+the private Python environment, or generated images.
+
+## What is reproduced
+
+- Qwen Image 2.1 direct Diffusers inference
+- Body/base as `<image1>` and head reference as `<image2>`
+- `bfs_head_v1.1_alternative_qwen_2.1.safetensors` at strength 1.0
+- `Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors` at strength 1.0
+- Six denoising steps and CFG 1.0
+- About a 1 MP ratio-preserving working canvas, rounded to multiples of 32
+- 2x Lanczos output scaling
+- Automatic GPU residency or CPU/GPU offload according to available VRAM
+
+Diffusers uses Qwen Image 2.1's official FlowMatch Euler scheduler. It is the
+standalone pipeline equivalent, not ComfyUI's `KSampler` implementation, so the
+same seed is not expected to produce a pixel-identical image.
+
+## Faster repeat swaps
+
+The app caches the last prompt plus its body/head references and two deterministic
+VAE reference encodings in system RAM. Both reference images, their ordering,
+and the prompt are part of the cache key. Changing the seed or LoRA strengths
+does not require re-encoding unchanged references. No denoising steps are skipped.
+
+With at least 22 GiB of free VRAM at model load and a canvas up to about 1 MP,
+the default fast mode retains the swap transformer and VAE on the GPU. The text
+encoder runs only when needed and returns to system RAM. Larger canvases or the
+unchecked **Keep swap model on GPU** option use component CPU offload; a busy GPU
+at startup selects slower sequential offload. On a mostly free 24 GB card, larger
+512-pixel VAE tiles reduce encoding/decoding overhead. Tiling can slightly change
+pixels versus the old 256-pixel tiles; steps, resolution and adapters are unchanged.
+
+First generation includes model loading. New references or a changed prompt are
+slower than repeated swaps using the same inputs. The result status reports total
+time, memory mode and cache reuse. Fast mode holds substantial GPU memory between
+swaps: click **Release models / free GPU memory** before running another GPU app.
+This clears memory only, never downloaded models or saved images. The next swap
+reloads the models. Restart the app to load code updates; no new model download is
+needed for this speed update.
+
+Local RTX 4090 verification (six steps, 864 x 1248 working canvas, 1728 x 2496 PNG):
+the previous build took 32.8 seconds initially and 23.3 seconds warm. The updated
+build took 22.9 seconds for initial conditioning and 8.7-8.8 seconds for repeated
+inputs. A changed head reference took 20.8 seconds. These measurements exclude
+model loading, include saving the PNG, and are not a guarantee for every image.
+At a fixed seed, cached and uncached runs of the updated build were pixel-identical.
+
+## Requirements
+
+- Windows 10/11 64-bit
+- Python 3.10 or 3.11
+- NVIDIA GPU with a recent driver; tested target is RTX 4090 24 GB
+- Roughly 60 GB free disk space during installation
+- About 64 GB system RAM recommended for bf16 CPU offload
+
+The installer uses a private virtual environment inside `BFS-Swap\.venv` and
+keeps its models inside `BFS-Swap\models`.
+
+## Model sources
+
+- `Qwen/Qwen-Image-2.1`
+- `Alissonerdx/BFS-Best-Face-Swap`
+- `Viggle/Qwen-Image-2.1-viggle-turbo`
+
+The installer pins exact upstream revisions recorded on September 29, 2026.
+Review each upstream model license before redistribution or commercial use.
