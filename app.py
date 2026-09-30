@@ -178,10 +178,15 @@ def calculate_working_size(image: Image.Image, megapixels: float = 1.0) -> tuple
     width, height = image.size
     if width < 1 or height < 1:
         raise ValueError("The base image has invalid dimensions.")
+    if model_profile() == "low-vram-12gb":
+        megapixels = min(float(megapixels), 0.5)
     target_area = max(0.25, float(megapixels)) * 1_048_576
     ratio = width / height
     scaled_width = max(32, round((target_area * ratio) ** 0.5 / 32) * 32)
     scaled_height = max(32, round((target_area / ratio) ** 0.5 / 32) * 32)
+    if model_profile() == "low-vram-12gb":
+        scaled_width = max(32, int((target_area * ratio) ** 0.5 / 32) * 32)
+        scaled_height = max(32, int((target_area / ratio) ** 0.5 / 32) * 32)
     return scaled_width, scaled_height
 
 
@@ -270,13 +275,13 @@ def model_profile() -> str:
     if value is None and PROFILE_FILE.is_file():
         value = PROFILE_FILE.read_text(encoding="utf-8").strip()
     value = value or "standard"
-    if value not in {"standard", "low-vram"}:
-        raise RuntimeError(f"Invalid model profile {value!r}; expected standard or low-vram.")
+    if value not in {"standard", "low-vram", "low-vram-12gb"}:
+        raise RuntimeError(f"Invalid model profile {value!r}.")
     return value
 
 
 def selected_turbo_lora() -> Path:
-    return LOW_TURBO_LORA if model_profile() == "low-vram" else TURBO_LORA
+    return LOW_TURBO_LORA if model_profile() != "standard" else TURBO_LORA
 
 
 def missing_model_files() -> list[Path]:
@@ -342,7 +347,7 @@ def _load_pipeline():
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. This app requires a supported NVIDIA GPU.")
 
-        low_vram = model_profile() == "low-vram"
+        low_vram = model_profile() != "standard"
         load_options = dict(dtype=torch.bfloat16, local_files_only=True, low_cpu_mem_usage=True)
         if low_vram:
             from diffusers.quantizers import PipelineQuantizationConfig
@@ -357,6 +362,12 @@ def _load_pipeline():
                 components_to_quantize=["transformer", "text_encoder"],
             )
         pipe = FastQwenImage21Pipeline.from_pretrained(BASE_MODEL_DIR, **load_options)
+        pipe.twelve_gb_mode = model_profile() == "low-vram-12gb"
+        if pipe.twelve_gb_mode:
+            # Quantized loading initially places both large components on CUDA.
+            # Free the encoder before attaching the two transformer adapters.
+            pipe.text_encoder.to("cpu")
+            torch.cuda.empty_cache()
 
         # Diffusers converts the Comfy/ai-toolkit prefix. Qwen's standalone
         # model keeps the fused [gate; up] MLP as two linear layers, so split
@@ -394,6 +405,8 @@ def _load_pipeline():
         if low_vram:
             pipe.enable_model_cpu_offload(gpu_id=0)
             _OFFLOAD_MODE = "low-VRAM NF4 + component CPU offload"
+            if pipe.twelve_gb_mode:
+                _OFFLOAD_MODE = "experimental 12 GB: NF4 + CPU offload, 512px references"
         elif _RESIDENT_ALLOWED:
             pipe.enable_fast_residency()
             _OFFLOAD_MODE = "fast GPU residency"
@@ -566,9 +579,12 @@ def build_likeness_ui(gr):
         with gr.Row():
             bfs_strength = gr.Slider(0.0, 1.5, value=1.0, step=0.05, label="BFS identity LoRA strength")
             turbo_strength = gr.Slider(0.0, 1.25, value=1.0, step=0.05, label="Viggle turbo LoRA strength")
-            working_mp = gr.Slider(0.5, 2.0, value=1.0, step=0.1, label="Working megapixels")
+            small = model_profile() == "low-vram-12gb"
+            working_mp = gr.Slider(0.25 if small else 0.5, 0.5 if small else 2.0,
+                                   value=0.5 if small else 1.0, step=0.05 if small else 0.1,
+                                   label="Working megapixels (12 GB test)" if small else "Working megapixels")
             upscale = gr.Radio([1, 2], value=2, label="Lanczos output upscale")
-        if model_profile() == "low-vram":
+        if model_profile() != "standard":
             keep_on_gpu = gr.Checkbox(
                 False,
                 label="Low-VRAM mode: automatic component offload (GPU residency disabled)",
@@ -649,7 +665,7 @@ def self_check() -> int:
     print(f"Diffusers: {diffusers.__version__}")
     print(f"Transformers: {transformers.__version__}")
     print(f"Gradio: {gradio.__version__}")
-    if model_profile() == "low-vram":
+    if model_profile() != "standard":
         import bitsandbytes
 
         print(f"BitsAndBytes: {bitsandbytes.__version__}")

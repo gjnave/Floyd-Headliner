@@ -278,8 +278,14 @@ def build_inpaint_ui(gr, runtime):
             seed = gr.Number(value=42, precision=0, label="Seed")
             randomize = gr.Checkbox(True, label="Randomize seed")
             steps = gr.Slider(6, 24, value=6, step=1, label="Steps")
-            megapixels = gr.Slider(.5, 1.5, value=1.0, step=.1, label="Working megapixels")
-        keep_gpu = gr.Checkbox(True, label="Keep model on GPU for faster repeat edits")
+            small = runtime.model_profile() == "low-vram-12gb"
+            megapixels = gr.Slider(.25 if small else .5, .5 if small else 1.5,
+                                   value=.5 if small else 1.0, step=.05 if small else .1,
+                                   label="Working megapixels (12 GB test)" if small else "Working megapixels")
+        standard = runtime.model_profile() == "standard"
+        keep_gpu = gr.Checkbox(standard, interactive=standard,
+                              label="Keep model on GPU for faster repeat edits" if standard
+                              else "Low-VRAM mode: automatic CPU offload")
     with gr.Accordion("Edit area preview", open=False) as preview_panel:
         gr.Markdown("Refresh this preview after changing your drawing or the Inpaint settings.")
         preview_image = gr.Image(label="Gold area can change; everything else stays original", interactive=False, type="pil", height=350)

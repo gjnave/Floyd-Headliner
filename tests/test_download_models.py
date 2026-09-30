@@ -10,6 +10,21 @@ import download_models as models
 
 
 class DownloadModelsTests(unittest.TestCase):
+    def test_current_profile_retains_twelve_gb_mode(self):
+        from unittest.mock import Mock
+        profile = Mock()
+        profile.is_file.return_value = True
+        profile.read_text.return_value = "low-vram-12gb\n"
+        with patch.object(models, "PROFILE_FILE", profile), \
+             patch.object(sys, "argv", ["download_models.py", "--profile", "current"]), \
+             patch.object(models, "snapshot_download"), \
+             patch.object(models, "download_lora") as download, \
+             patch.object(Path, "mkdir"), patch.object(Path, "is_file", return_value=True), \
+             patch.object(models.shutil, "disk_usage", return_value=SimpleNamespace(free=100 * 1024**3)):
+            self.assertEqual(models.main(), 0)
+        self.assertEqual(download.call_args_list[-1].args, models.LOW_TURBO_LORA)
+        profile.write_text.assert_called_once_with("low-vram-12gb\n", encoding="utf-8")
+
     def setUp(self):
         # Keep tiny test artifacts; no user files or existing models are removed.
         self.lora_dir = Path(__file__).resolve().parents[2] / "installer-cache" / f"model-test-{uuid4().hex}"

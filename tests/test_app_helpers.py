@@ -15,6 +15,11 @@ SPEC.loader.exec_module(APP)
 
 
 class AppHelperTests(unittest.TestCase):
+    def test_twelve_gb_profile_limits_canvas_and_selects_small_adapter(self):
+        with patch.object(APP, "model_profile", return_value="low-vram-12gb"):
+            self.assertEqual(APP.selected_turbo_lora(), APP.LOW_TURBO_LORA)
+            self.assertEqual(APP.calculate_working_size(Image.new("RGB", (512, 512)), 2), (704, 704))
+
     def test_mask_checkbox_tracks_paint_and_erasure(self):
         background = Image.new("RGBA", (100, 80), "blue")
         empty = Image.new("RGBA", background.size)

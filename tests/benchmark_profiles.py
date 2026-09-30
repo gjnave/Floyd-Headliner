@@ -26,9 +26,10 @@ def reference(color: str, hair: str) -> Image.Image:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", required=True, choices=("standard", "low-vram"))
+    parser.add_argument("--profile", required=True, choices=("standard", "low-vram", "low-vram-12gb"))
     parser.add_argument("--size", type=int, default=704)
     parser.add_argument("--vram-cap-gib", type=float)
+    parser.add_argument("--inpaint", action="store_true", help="Smoke the three-reference editing path")
     args = parser.parse_args()
     os.environ["FLOYD_HEADLINER_PROFILE"] = args.profile
 
@@ -47,13 +48,14 @@ def main() -> None:
     torch.cuda.synchronize()
     load_seconds = time.perf_counter() - load_started
     app.configure_speed_mode(pipe, True, args.size, args.size)
-    pipe.set_adapters(["bfs", "turbo"], adapter_weights=[1.0, 1.0])
+    pipe.set_adapters(["turbo"] if args.inpaint else ["bfs", "turbo"],
+                      adapter_weights=[1.0] if args.inpaint else [1.0, 1.0])
     generation_seconds = []
     for seed in (42, 43):
         generate_started = time.perf_counter()
         output = pipe(
             prompt=app.DEFAULT_PROMPT,
-            image=[body, head],
+            image=[body, head, Image.new("RGB", body.size, "white")] if args.inpaint else [body, head],
             width=args.size,
             height=args.size,
             num_inference_steps=6,
@@ -64,6 +66,7 @@ def main() -> None:
         generation_seconds.append(round(time.perf_counter() - generate_started, 2))
     print("BENCHMARK " + json.dumps({
         "profile": args.profile,
+        "mode": "inpaint-three-references" if args.inpaint else "likeness",
         "canvas": args.size,
         "result": list(output.size),
         "load_seconds": round(load_seconds, 2),

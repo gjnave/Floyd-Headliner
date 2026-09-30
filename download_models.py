@@ -95,14 +95,14 @@ def download_lora(repo: str, revision: str, filename: str, drive_id: str | None,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download Floyd Headliner models")
-    parser.add_argument("--profile", choices=("standard", "low-vram", "current"), default="current")
+    parser.add_argument("--profile", choices=("standard", "low-vram", "low-vram-12gb", "current"), default="current")
     args = parser.parse_args()
     profile = args.profile
     if profile == "current":
         profile = PROFILE_FILE.read_text(encoding="utf-8").strip() if PROFILE_FILE.is_file() else "standard"
-    if profile not in {"standard", "low-vram"}:
+    if profile not in {"standard", "low-vram", "low-vram-12gb"}:
         raise RuntimeError(f"Invalid installed model profile: {profile!r}")
-    selected_loras = (BFS_LORA, LOW_TURBO_LORA if profile == "low-vram" else STANDARD_TURBO_LORA)
+    selected_loras = (BFS_LORA, LOW_TURBO_LORA if profile != "standard" else STANDARD_TURBO_LORA)
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     LORA_DIR.mkdir(parents=True, exist_ok=True)

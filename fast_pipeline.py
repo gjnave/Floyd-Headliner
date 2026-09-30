@@ -32,6 +32,21 @@ def copy_tensors(value, device):
 
 class FastQwenImage21Pipeline(QwenImage21Pipeline):
     # Inherit __init__ unchanged: Diffusers inspects its component signature.
+    @torch.no_grad()
+    def __call__(self, *args, **kwargs):
+        if getattr(self, "twelve_gb_mode", False):
+            # Shared by likeness transfer and inpaint, including direct API calls.
+            # The upstream default resizes each reference to 1 MP independently
+            # of the output size, so lowering only the output is insufficient.
+            kwargs["output_resolution"] = 512
+            kwargs["use_kv_cache"] = False
+            width, height = kwargs.get("width"), kwargs.get("height")
+            if width and height and width * height > 512 * 1024:
+                scale = (512 * 1024 / (width * height)) ** 0.5
+                kwargs["width"] = max(32, int(width * scale / 32) * 32)
+                kwargs["height"] = max(32, int(height * scale / 32) * 32)
+        return super().__call__(*args, **kwargs)
+
     @property
     def fast_resident(self):
         return getattr(self, "_fast_resident", False)

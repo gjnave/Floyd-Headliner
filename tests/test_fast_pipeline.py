@@ -82,6 +82,20 @@ class ConditioningCacheTests(unittest.TestCase):
             self.encode()
             self.assertEqual(encode.call_count, 2)
 
+    def test_twelve_gb_limits_apply_to_all_pipeline_calls(self):
+        self.pipe.twelve_gb_mode = True
+        with patch.object(QwenImage21Pipeline, "__call__") as call:
+            self.pipe(prompt="edit", width=1024, height=1024, output_resolution=640)
+            values = call.call_args.kwargs
+            self.assertEqual(values["output_resolution"], 512)
+            self.assertFalse(values["use_kv_cache"])
+            self.assertLessEqual(values["width"] * values["height"], 524288)
+
+    def test_standard_call_settings_remain_unchanged(self):
+        with patch.object(QwenImage21Pipeline, "__call__") as call:
+            self.pipe(prompt="edit", width=1024, height=1024)
+            self.assertEqual(call.call_args.kwargs, dict(prompt="edit", width=1024, height=1024))
+
     def test_keys_include_size_shape_dtype_and_pixels(self):
         self.assertNotEqual(image_key(self.body), image_key(self.head))
         self.assertNotEqual(tensor_key(torch.zeros(2, 2)), tensor_key(torch.zeros(1, 4)))

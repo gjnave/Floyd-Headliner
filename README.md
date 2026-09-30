@@ -56,6 +56,32 @@ model files; `download_models.py --profile standard` restores the original mode.
 The current low-VRAM profile is aimed at approximately 16 GB GPUs; 12 GB cards
 have not been verified and may run out of memory. Keep other GPU apps closed.
 
+### Experimental 12 GB GPU test mode
+
+The Quick Setup Helper now offers **3. Experimental 12 GB**. For manual source
+setup, install the bitsandbytes dependency above, then run
+`download_models.py --profile low-vram-12gb` with the private environment's Python.
+Restart the app after switching profiles. Updates preserve the selected profile.
+
+This mode keeps both identity/turbo adapters, uses NF4 and component CPU offload,
+limits the working canvas to 0.5 MP (704 × 704 for square images), resizes
+references to about 512 × 512 worth of pixels, and disables transformer KV
+caching. The limits apply to both Likeness Transfer and Inpaint. Fine detail may
+be reduced; output upscaling does not restore lost detail. It still needs the
+same base-model download and substantial system RAM.
+
+Two-reference, six-step smoke test on an RTX 4090 with a **10.5 GiB PyTorch
+allocation cap**: load 25.26 s; first generation 10.04 s; cached generation
+6.66 s; peak allocated 10.03 GiB / reserved 10.09 GiB. Loading is excluded from
+generation times. This is a memory-budget simulation, **not an actual 12 GB GPU
+benchmark**; CUDA/desktop memory outside PyTorch is additional. Real-card speed,
+available RAM, image quality, and reliability still need user testing. Close other
+GPU apps before testing. Standard mode remains unchanged.
+
+The three-reference Inpaint pipeline also passed the same cap at 704 × 704:
+10.46 s first / 7.54 s cached, with 10.22 GiB peak reserved. These synthetic
+smoke tests check execution and memory, not photographic likeness quality.
+
 ![Floyd Headliner — Likeness Transfer](assets/fh2.png)
 
 
