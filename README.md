@@ -2,7 +2,7 @@
 
 # Floyd Headliner — Likeness Transfer
 
-## A Get Going Fast Application - (https://youtube.com/@theaihobbyguy)
+## A Get Going Fast Application
 
 ### [Quick Setup Helper → GetGoingFast.pro/tools/floydheadliner](https://getgoingfast.pro/tools/floydheadliner)
 
