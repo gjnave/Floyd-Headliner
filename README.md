@@ -2,7 +2,7 @@
 
 # Floyd Headliner — Likeness Transfer
 
-## Get going fast
+## A Get Going Fast Application
 
 ### [Quick Setup Helper → GetGoingFast.pro/tools/floydheadliner](https://getgoingfast.pro/tools/floydheadliner)
 
@@ -161,3 +161,16 @@ Floyd Headliner's own app code and documentation are available under the
 [GNU General Public License, version 3 or later](LICENSE); the complete GPLv3
 text is in [COPYING](COPYING). Third-party models, adapters, and dependencies
 remain under their respective licenses.
+
+## Source and Hosting Notice
+Get Going Fast provides community setup guidance, documentation, tutorials, troubleshooting support, and member services. Get Going Fast does not sell, host, store, mirror, or redistribute AI model files, model weights, training datasets, or the third-party applications our guides cover. Those always come from their own official upstream sources.
+
+A small number of setup files — example workflow, preset, and configuration files used by our installers and step-by-step guides — are served directly from Get Going Fast so that a documented setup stays reproducible for members. Where such a file originates with a third party we credit its author and link to the original project, and we will remove or repoint it promptly at the request of its author or rights holder.
+
+The Get Going Fast Resource Library is a research index. It stores descriptions, categories, tags, ratings, and links only. Workflows, prompt packs, templates, presets, and similar files are never copied to or served from Get Going Fast servers — every entry links out to the original author's own source, and obtaining the file is subject to that source's license, terms, and availability.
+
+When a setup guide references third-party dependencies, repositories, or model files, it points users to official upstream public sources such as GitHub, Hugging Face, package managers, or original project repositories, subject to those sources' own licenses, terms, and availability.
+
+Get Going Fast is a general-audience AI education and workflow site, not an adult-content site or hosted AI generation service. Do not use Get Going Fast materials, support, guidance, or referenced third-party tools for unlawful, abusive, non-consensual, sexually explicit, exploitative, harassing, deceptive, or privacy-violating content, including misuse of another person's likeness, voice, identity, intellectual property, privacy, or publicity rights. See our Acceptable Use Policy.
+
+If you are a rights holder, platform reviewer, payment processor, or hosting provider with a concern about a listed tool, guide reference, catalog entry, or upstream source, please contact us. We will review the concern promptly and remove or revise references when appropriate.
