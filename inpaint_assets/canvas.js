@@ -11,6 +11,14 @@ let tool = 'add', hidden = false, zoom = 1, uploading = false, loadVersion = 0;
 const q = (selector) => element.querySelector(selector);
 const brushSize = () => Number(q('.paint-size').value);
 
+function setTool(next) {
+  tool = next;
+  element.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
+  q('.paint-color').disabled = tool !== 'color';
+  q('.paint-color').title = tool === 'color' ? 'Desired color for Color strokes' : 'Select Color to recolor an object. Add and Remove use fixed guide colors.';
+  q('.paint-tool-status').textContent = ({add:'ADD: sketch a new shape', remove:'REMOVE: paint the object to erase', color:'COLOR: paint the desired color', erase:'ERASER: clear brush marks'})[tool];
+}
+
 function controls() {
   q('.paint-undo').disabled = !strokes.length;
   q('.paint-redo').disabled = !redo.length;
@@ -86,10 +94,12 @@ q('.paint-upload').addEventListener('change', event => {loadFile(event.target.fi
 viewport.addEventListener('dragover', event => {event.preventDefault();});
 viewport.addEventListener('drop', event => {event.preventDefault(); loadFile(event.dataTransfer.files[0]);});
 element.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
-  tool = button.dataset.tool;
-  element.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+  finish();
+  setTool(button.dataset.tool);
 }));
-q('.paint-color').addEventListener('input', () => q('[data-tool="color"]').click());
+// Picking a color must never turn Remove into Color behind the user's back.
+q('.paint-color').addEventListener('input', () => controls());
+setTool('add');
 q('.paint-size').addEventListener('input', () => {q('.size-value').textContent = brushSize();});
 const point = (event) => {const rect = canvas.getBoundingClientRect(); return [Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))];};
 canvas.addEventListener('pointerdown', event => {

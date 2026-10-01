@@ -284,6 +284,16 @@ def composite_selection(body, generated, mask, crop, feather):
     return result
 
 
+def protected_reference(original, painted):
+    """Hide painted heads before conditioning; return the exact restoration mask."""
+    if painted is None or painted.getbbox() is None:
+        raise ValueError("Paint over the whole head you want to protect, including hair.")
+    protected = painted.filter(ImageFilter.MaxFilter(17))
+    reference = original.copy()
+    reference.paste((127, 127, 127), mask=protected)
+    return reference, protected
+
+
 def run_swap_ui(*args):
     result, path, status, used_seed = run_swap(*args)
     original, _, _ = prepare_selection(args[0])
@@ -568,6 +578,7 @@ def run_swap(
     extra_prompt: str = "",
     selected_only: bool = False,
     feather: float = 8,
+    mask_mode: str = "Edit painted area",
 ):
     if body_image is None:
         raise ValueError("Add the body/base image (Image 1).")
@@ -582,7 +593,20 @@ def run_swap(
     import torch
 
     original, mask, crop = prepare_selection(body_image, selected_only)
-    body = original.crop(crop) if crop else original
+    if mask_mode not in ("Edit painted area", "Protect painted area (experimental)"):
+        raise ValueError("Choose a valid painted-area mode.")
+    protect = selected_only and mask_mode == "Protect painted area (experimental)"
+    if protect:
+        body, protected = protected_reference(original, mask)
+        crop = (0, 0, original.width, original.height)
+        mask = ImageOps.invert(protected)
+        if mask.getbbox() is None:
+            raise ValueError("Leave the target head unpainted; the entire image is protected.")
+        effective_prompt += ("\nThe flat gray covered regions in <image1> hide protected heads. "
+                             "Transfer the reference likeness only to the remaining visible head. "
+                             "Do not create a new head in the covered regions.")
+    else:
+        body = original.crop(crop) if crop else original
     head = ImageOps.exif_transpose(head_image).convert("RGB")
     width, height = calculate_working_size(body, working_megapixels)
     used_seed = random.randint(0, 2**63 - 1) if randomize_seed else int(seed)
@@ -629,7 +653,9 @@ def run_swap(
         f"Time: `{elapsed:.1f} s` | {_OFFLOAD_MODE} | "
         f"Reference/prompt cache: `{'reused' if pipe.prompt_cache_hit else 'encoded'}`"
     )
-    if selected_only:
+    if protect:
+        status += "  \nProtect experiment: painted heads hidden from the model, then restored from the original."
+    elif selected_only:
         status += "  \nPainted-area edit: original dimensions retained; unpainted pixels unchanged."
     return result, str(output_path), status, used_seed
 
@@ -640,7 +666,10 @@ def build_likeness_ui(gr):
         "**2. HEAD REFERENCE:** supplies the face, head, hair, and identity. Both images are required.",
         elem_classes="ggf-guide",
     )
-    selected_only = gr.Checkbox(label="Edit painted area only", value=False)
+    selected_only = gr.Checkbox(label="Use painted mask (painting enables this)", value=False)
+    mask_mode = gr.Radio(["Edit painted area", "Protect painted area (experimental)"],
+                        value="Edit painted area", label="Painted area",
+                        info="Protect: cover the entire head you want kept, including hair. Leave the target head visible.")
     with gr.Row():
         body = gr.ImageEditor(
             type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
@@ -660,10 +689,10 @@ def build_likeness_ui(gr):
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
     )
     gr.Markdown(
-        "For multiple people, paint over **only the intended head**, including hair or hats to remove. "
-        "Painting enables **Edit painted area only** automatically; clearing the paint turns it off. "
-        "The app edits a crop and blends it back; unpainted pixels stay unchanged. "
-        "Paint enough room for the replacement hair. Uncheck the box to edit the whole image.",
+        "**Edit painted area:** paint the intended head; only that area changes. "
+        "**Protect painted area (experimental):** paint the heads to keep; the model sees them covered, "
+        "then their original pixels are restored. Everything else can change. "
+        "Leave one target head visible. Painting enables the mask; clearing it turns the mask off.",
         elem_classes="ggf-guide",
     )
     feather = gr.Slider(0, 32, value=8, step=1, label="Selection edge softness (original-image pixels)")
@@ -705,7 +734,7 @@ def build_likeness_ui(gr):
     generate.click(
         fn=run_swap_ui,
         inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
-                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather],
+                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather, mask_mode],
         outputs=[output, saved_file, status, used_seed], concurrency_id="gpu",
     )
     return output, send_to_inpaint

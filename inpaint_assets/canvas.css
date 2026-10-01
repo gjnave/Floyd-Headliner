@@ -21,4 +21,5 @@
 .paint-empty {position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#dce8f7; font-size:20px; pointer-events:none;}
 .paint-empty small {font-size:14px; color:#9db0cc; margin-top:8px; text-align:center;}
 .paint-hint {font-size:12px; color:#bdcce1; padding:8px 12px; margin:0;}
+.paint-color:disabled {opacity:.35; cursor:not-allowed;}
 @media(max-width:680px) {.paint-viewport {height:420px;} .paint-toolbar {gap:6px;padding:8px;} .paint-info {width:100%;} .paint-toolbar button {padding:8px;}}

@@ -15,6 +15,19 @@ SPEC.loader.exec_module(APP)
 
 
 class AppHelperTests(unittest.TestCase):
+    def test_protect_hides_reference_and_restores_original_pixels(self):
+        original = Image.new("RGB", (100, 80), "blue")
+        painted = Image.new("L", original.size)
+        painted.paste(255, (10, 10, 30, 30))
+        reference, protected = APP.protected_reference(original, painted)
+        self.assertEqual(reference.getpixel((20, 20)), (127, 127, 127))
+        self.assertEqual(reference.getpixel((80, 60)), original.getpixel((80, 60)))
+        result = APP.composite_selection(original, Image.new("RGB", original.size, "red"),
+                                        APP.ImageOps.invert(protected), (0, 0, 100, 80), 8)
+        self.assertEqual(result.getpixel((20, 20)), original.getpixel((20, 20)))
+        self.assertEqual(result.getpixel((80, 60)), (255, 0, 0))
+        delta = APP.ImageChops.difference(original, result)
+        self.assertIsNone(APP.ImageChops.multiply(delta, protected.convert("RGB")).getbbox())
     def test_generate_editor_preprocessing_retries_incomplete_png(self):
         expected = {"background": Image.new("RGBA", (20, 20)), "layers": []}
         original = Mock(side_effect=[OSError("image file is truncated"),

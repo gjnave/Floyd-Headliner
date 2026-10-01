@@ -1,14 +1,44 @@
 import sys
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app
-from inpaint import editing_prompt
+from inpaint import editing_prompt, image_data_url, run_inpaint
 
 
 class InpaintFocusTests(unittest.TestCase):
+    def test_blank_remove_identifies_object_and_never_sends_pink_guide(self):
+        payload = {"image": image_data_url(Image.new("RGB", (64, 64), "blue")),
+                   "strokes": [{"tool":"remove", "size":10, "color":"#ff2d55",
+                                "points":[[.4,.4],[.6,.6]]}]}
+        class Pipe:
+            fast_resident = False
+            prompt_cache_hit = False
+            def set_adapters(self, *args, **kwargs): pass
+            def __call__(self, **kwargs):
+                self.request = kwargs
+                return SimpleNamespace(images=[Image.new("RGB", (64,64), "white")])
+        pipe = Pipe()
+        with patch.object(app, "_load_pipeline", return_value=pipe), patch("torch.Generator"), \
+             patch.object(Image.Image, "save"), patch("torch.cuda.empty_cache"), \
+             patch("inpaint.suggest_prompt", return_value="Remove the cup.") as guess:
+            result = run_inpaint(app, payload, "", 42, False, 6, .5, 0, 0, True, False)
+        guess.assert_called_once()
+        self.assertIn("Remove the cup.", pipe.request["prompt"])
+        self.assertEqual(len(pipe.request["image"]), 2)
+        self.assertTrue(all(r == g == b for r,g,b in pipe.request["image"][1].getdata()))
+        self.assertIn("Automatic Remove instruction", result[2])
+    def test_remove_only_has_no_colored_guide_instruction(self):
+        prompt = editing_prompt("Remove the cup", ["remove"])
+        self.assertIn("black-and-white selection mask", prompt)
+        self.assertNotIn("red/pink", prompt)
+        self.assertNotIn("<image3>", prompt)
+        self.assertIn("Remove the cup", prompt)
     def test_blank_remove_on_person_keeps_subject_and_replaces_clothing(self):
         prompt = editing_prompt("", ["remove"], "Person")
         self.assertIn("Keep the person present", prompt)

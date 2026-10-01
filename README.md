@@ -109,6 +109,24 @@ the subject present when removing painted clothing, but a prompt describing
 the replacement garment gives the model a clearer target. Default keeps the
 previous general editing instruction.
 
+The brush toolbar always shows the active tool. Add uses green selection marks;
+Remove uses pink selection marks. Choose **Color** explicitly to recolor, then
+choose its desired color. The color picker no longer switches tools. For a
+Remove-only edit, leaving the prompt blank first asks the vision encoder to name
+the selected object. The generated instruction is shown below the result. Remove
+then uses the original image and a black-and-white selection instead of a pink
+guide image. It may still misidentify an object; a specific written instruction
+overrides the automatic guess. This Qwen editing path does not use MagicQuill's
+BrushNet inpainting model.
+
+For likeness transfer, **Protect painted area (experimental)** hides painted heads
+from the input seen by the model, then restores those regions from the original.
+Cover the entire head, including hair, and leave one target head visible. Painting
+enables **Use painted mask**. Unlike **Edit painted area**, the unprotected image
+can change. Protected results retain the original image dimensions. The experiment
+passed a two-portrait test with exact protected-pixel restoration, but target choice
+and changes outside the mask remain dependent on the model.
+
 ## What is reproduced
 
 - Qwen Image 2.1 direct Diffusers inference

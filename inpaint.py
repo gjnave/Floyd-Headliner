@@ -130,6 +130,7 @@ FOCUS_CHOICES = ("Default", "Person", "Objects", "Background")
 def editing_prompt(instruction, modes, focus="Default"):
     if focus not in FOCUS_CHOICES:
         raise ValueError("Choose a valid Inpaint focus.")
+    remove_only = modes == ["remove"]
     text = (
         "Edit <image1>, the original photograph. <image2> is an annotated editing guide, "
         "not a desired output. <image3> is the edit mask: white marks the editable area, "
@@ -137,6 +138,14 @@ def editing_prompt(instruction, modes, focus="Default"):
         "all unrelated content as <image1>. Return a finished natural image, without "
         "guide lines, colored masks, labels or annotations. "
     )
+    if remove_only:
+        text = (
+            "Edit <image1>, the original photograph. <image2> is a black-and-white selection mask: "
+            "white selects the object or detail to remove, black must stay unchanged. "
+            "Delete the selected content and fill its former location naturally using the "
+            "surrounding scene. Return the completed photograph with the same framing, camera "
+            "and lighting, without a mask, outline, solid fill, or painted marks. "
+        )
     if focus == "Person":
         text += ("Focus on the person within the editable area. Preserve their identity, "
                  "face, pose, body proportions, and the surrounding scene. Keep the person "
@@ -153,11 +162,13 @@ def editing_prompt(instruction, modes, focus="Default"):
                  "something to ADD or replace. Turn that rough drawing into a realistic "
                  "object matching the scene; do not leave green strokes. ")
     if "remove" in modes:
-        text += "The red/pink painted regions in <image2> mark content to REMOVE. "
+        if not remove_only:
+            text += "The red/pink painted regions in <image2> mark content to REMOVE. "
         if focus == "Person":
-            text += ("Remove that content. When removing clothing or an accessory, replace it with natural "
-                     "clothing or accessories suitable for the scene; do not erase the "
-                     "person or fill the area with background. ")
+            text += ("Remove that content. When removing clothing, replace it with natural "
+                     "clothing suitable for the scene; do not erase the person or fill the area "
+                     "with background. When removing an accessory, restore the underlying "
+                     "appearance without adding another accessory. ")
         elif focus == "Background":
             text += ("Remove painted background details and reconstruct the surrounding "
                      "setting while keeping people and foreground objects intact. ")
@@ -183,8 +194,14 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     used_seed = random.randint(0, 2**63 - 1) if randomize else int(seed)
     if not 0 <= used_seed < 2**63:
         raise ValueError("Seed must be between 0 and 9223372036854775807.")
-    prompt = editing_prompt(instruction, modes, focus)
     started = time.perf_counter()
+    inferred = ""
+    if modes == ["remove"] and not (instruction or "").strip():
+        if progress is not None:
+            progress(.01, desc="Identifying the object to remove")
+        inferred = suggest_prompt(runtime, payload, grow, fill_closed, focus)
+        instruction = inferred
+    prompt = editing_prompt(instruction, modes, focus)
     if progress is not None:
         progress(.02, desc="Loading local models")
     with runtime._PIPELINE_LOCK:
@@ -200,9 +217,12 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
                 progress(.25 + .65 * (index + 1) / int(steps), desc=f"Inpainting {index + 1}/{int(steps)}")
             return values
 
+        references = ([original.crop(crop), mask.crop(crop).convert("RGB")]
+                      if modes == ["remove"] else
+                      [original.crop(crop), guide.crop(crop), mask.crop(crop).convert("RGB")])
         generated = pipe(
             prompt=prompt,
-            image=[original.crop(crop), guide.crop(crop), mask.crop(crop).convert("RGB")],
+            image=references,
             width=width, height=height, num_inference_steps=int(steps), true_cfg_scale=1.0,
             # Three 1 MP references can spill a 24 GB card into shared memory.
             # Guide resolution is independent of the generated patch dimensions.
@@ -221,12 +241,18 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     metadata.add_text("Floyd Headliner", "Inpaint — Qwen Image 2.1 + Viggle Turbo; identity LoRA disabled")
     metadata.add_text("prompt", prompt)
     metadata.add_text("seed", str(used_seed))
+    metadata.add_text("tools", ", ".join(modes))
+    metadata.add_text("focus", focus)
     result.save(filename, pnginfo=metadata)
     status = (f"Saved `{filename.name}`  \nSeed: `{used_seed}` | Time: `{time.perf_counter() - started:.1f} s` | "
-              f"Working canvas: `{width} × {height}` | Cache: `{'reused' if cache_hit else 'encoded'}`  \n"
+              f"Working canvas: `{width} × {height}` | Tools: `{', '.join(modes)}` | Focus: `{focus}` | Cache: `{'reused' if cache_hit else 'encoded'}`  \n"
               "Original dimensions retained. Pixels outside the expanded edit area are unchanged.")
     if progress is not None:
         progress(1, desc="Saved")
+    if inferred:
+        # Keep model-produced text out of Markdown/HTML interpretation.
+        import html
+        status += "  \nAutomatic Remove instruction: " + html.escape(inferred)
     return (original, result), str(filename), status, str(used_seed), result
 
 
@@ -248,6 +274,18 @@ def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
         "marks themselves. Do not include explanations. Active tools: " + ", ".join(modes) +
         ". Editing focus: " + focus + "."
     )
+    if modes == ["remove"]:
+        message = (
+            "Image 1 is the original photograph. Image 2 marks a selected area in red/pink. "
+            "Identify the real object underneath those marks in image 1. Write one precise "
+            "image editing instruction beginning with 'Remove the' followed by the concrete "
+            "object name. Describe what naturally replaces it. The red/pink color is only a "
+            "selection overlay, not the object and not a desired output color. "
+            "Do not say 'remove the red marks' or 'remove the selected region'. "
+            "Do not add an object. For clothing edits, describe replacement clothing. "
+            "For accessories, restore the underlying appearance. "
+            "Return only the edit instruction. Editing focus: " + focus + "."
+        )
     images = [original.crop(crop), guide.crop(crop)]
     for img in images:
         img.thumbnail((768, 768), Image.Resampling.LANCZOS)
@@ -279,7 +317,8 @@ def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
 
 def build_inpaint_ui(gr, runtime):
     gr.Markdown("Draw an idea with **+ Add**, paint unwanted objects with **− Remove**, or brush on a **Color**. "
-                "Describe the change, or use **Guess from drawing**. Your photo stays intact outside the edit area.",
+                "Blank Remove prompts automatically identify the painted object; describe it yourself for more control. "
+                "Your photo stays intact outside the edit area.",
                 elem_classes="ggf-guide")
     with gr.Row():
         canvas = gr.HTML(
