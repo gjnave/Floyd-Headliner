@@ -39,24 +39,36 @@ class InpaintFocusTests(unittest.TestCase):
         self.assertNotIn("red/pink", prompt)
         self.assertNotIn("<image3>", prompt)
         self.assertIn("Remove the cup", prompt)
-    def test_blank_remove_on_person_keeps_subject_and_replaces_clothing(self):
-        prompt = editing_prompt("", ["remove"], "Person")
-        self.assertIn("Keep the person present", prompt)
+    def test_blank_remove_keeps_subject_and_replaces_clothing(self):
+        prompt = editing_prompt("", ["remove"])
+        self.assertIn("Keep people present", prompt)
         self.assertIn("replace it with natural clothing", prompt)
         self.assertIn("do not erase the person", prompt)
 
-    def test_blank_remove_default_still_fills_surrounding_surface(self):
+    def test_default_preserves_existing_background_but_fills_removed_object(self):
         prompt = editing_prompt("", ["remove"])
-        self.assertIn("Remove those objects and reconstruct the natural background", prompt)
-        self.assertNotIn("replace it with natural clothing", prompt)
+        self.assertIn("Do not change the original background or setting", prompt)
+        self.assertIn("reconstruct only the background that was hidden", prompt)
 
-    def test_focus_is_connected_to_generate_and_guess(self):
+    def test_background_changes_require_checkbox(self):
+        default = editing_prompt("Make the sky sunset orange", ["color"])
+        allowed = editing_prompt("Make the sky sunset orange", ["color"], True)
+        self.assertIn("Do not change the original background", default)
+        self.assertTrue(default.endswith("only restore matching background where a removed object previously covered it."))
+        self.assertIn("enabled background changes", allowed)
+        self.assertNotIn("Do not change the original background", allowed)
+
+    def test_background_checkbox_is_off_and_connected_to_generate_and_guess(self):
         config = app.build_ui().get_config_file()
-        focus_id = next(component["id"] for component in config["components"]
-                        if component["type"] == "radio" and component["props"].get("label") == "Focus")
+        control = next(component for component in config["components"]
+                       if component["props"].get("label") == "Change background in painted area")
+        self.assertEqual(control["type"], "checkbox")
+        self.assertFalse(control["props"]["value"])
+        self.assertFalse(any(component["props"].get("label") == "Focus"
+                             for component in config["components"]))
         for name in ("inpaint", "guess_inpaint_prompt"):
             event = next(event for event in config["dependencies"] if event.get("api_name") == name)
-            self.assertIn(focus_id, event["inputs"])
+            self.assertIn(control["id"], event["inputs"])
 
 
 if __name__ == "__main__":

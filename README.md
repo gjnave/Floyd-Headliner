@@ -102,12 +102,12 @@ middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 **Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
-On the **Inpaint** tab, the **Focus** choices beside the image are Default,
-Person, Objects, and Background. Focus steers both **Generate edit** and
-**Guess from drawing**; it does not change the painted mask. Person focus keeps
-the subject present when removing painted clothing, but a prompt describing
-the replacement garment gives the model a clearer target. Default keeps the
-previous general editing instruction.
+On the **Inpaint** tab, **Change background in painted area** is off by default.
+The edit prompt preserves the existing setting; removing an object can reconstruct
+only the small area it previously covered. To edit scenery or replace a background,
+turn the checkbox on and paint the area to change. Pixels outside the painted edit
+area are always restored from the original. For clothing changes, describe the
+replacement garment in the prompt.
 
 The brush toolbar always shows the active tool. Add uses green selection marks;
 Remove uses pink selection marks. Choose **Color** explicitly to recolor, then

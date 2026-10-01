@@ -124,12 +124,7 @@ def prepare_edit(payload, grow=24, fill_closed=True):
     return original, guide, mask, crop, modes
 
 
-FOCUS_CHOICES = ("Default", "Person", "Objects", "Background")
-
-
-def editing_prompt(instruction, modes, focus="Default"):
-    if focus not in FOCUS_CHOICES:
-        raise ValueError("Choose a valid Inpaint focus.")
+def editing_prompt(instruction, modes, change_background=False):
     remove_only = modes == ["remove"]
     text = (
         "Edit <image1>, the original photograph. <image2> is an annotated editing guide, "
@@ -146,17 +141,15 @@ def editing_prompt(instruction, modes, focus="Default"):
             "surrounding scene. Return the completed photograph with the same framing, camera "
             "and lighting, without a mask, outline, solid fill, or painted marks. "
         )
-    if focus == "Person":
-        text += ("Focus on the person within the editable area. Preserve their identity, "
-                 "face, pose, body proportions, and the surrounding scene. Keep the person "
-                 "present rather than replacing them with background. ")
-    elif focus == "Objects":
-        text += ("Focus on the painted object. Preserve people, their clothing, and "
-                 "unpainted objects in the scene. ")
-    elif focus == "Background":
-        text += ("Focus on the setting behind the subjects. Preserve people, their "
-                 "clothing, and foreground objects. Reconstruct the surrounding setting "
-                 "naturally inside the editable area. ")
+    if change_background:
+        text += ("The user enabled background changes. You may edit the setting inside the "
+                 "painted area as requested. Preserve people and foreground objects unless "
+                 "the instruction explicitly changes them. ")
+    else:
+        text += ("Do not change the original background or setting: keep its scenery, "
+                 "colors, lighting, and perspective. Edit only the selected subject or object. "
+                 "If an object is removed, reconstruct only the background that was hidden "
+                 "behind that object, matching the existing scene. Keep people present. ")
     if "add" in modes:
         text += ("The bright green sketch in <image2> describes the shape and placement of "
                  "something to ADD or replace. Turn that rough drawing into a realistic "
@@ -164,16 +157,11 @@ def editing_prompt(instruction, modes, focus="Default"):
     if "remove" in modes:
         if not remove_only:
             text += "The red/pink painted regions in <image2> mark content to REMOVE. "
-        if focus == "Person":
-            text += ("Remove that content. When removing clothing, replace it with natural "
-                     "clothing suitable for the scene; do not erase the person or fill the area "
-                     "with background. When removing an accessory, restore the underlying "
-                     "appearance without adding another accessory. ")
-        elif focus == "Background":
-            text += ("Remove painted background details and reconstruct the surrounding "
-                     "setting while keeping people and foreground objects intact. ")
-        else:
-            text += "Remove those objects and reconstruct the natural background behind them. "
+        text += ("Remove that content. When removing clothing, replace it with natural "
+                 "clothing suitable for the scene; do not erase the person or fill the area "
+                 "with background. When removing an accessory, restore the underlying "
+                 "appearance without adding another accessory. For other objects, reconstruct "
+                 "the surface that was behind them. ")
     if "color" in modes:
         text += ("Other painted colors in <image2> are desired color guides. Apply those "
                  "colors naturally to the corresponding surfaces, retaining texture and shading. ")
@@ -182,11 +170,14 @@ def editing_prompt(instruction, modes, focus="Default"):
         text += "User's requested edit: " + instruction
     else:
         text += "Infer the intended edit from the sketch and the scene."
+    if not change_background:
+        text += (" Background changes are disabled. Do not replace or restyle the setting; "
+                 "only restore matching background where a removed object previously covered it.")
     return text
 
 
 def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixels, grow,
-                feather, fill_closed, keep_on_gpu, focus="Default", progress=None):
+                feather, fill_closed, keep_on_gpu, change_background=False, progress=None):
     original, guide, mask, crop, modes = prepare_edit(payload, grow, fill_closed)
     import torch
 
@@ -199,9 +190,9 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     if modes == ["remove"] and not (instruction or "").strip():
         if progress is not None:
             progress(.01, desc="Identifying the object to remove")
-        inferred = suggest_prompt(runtime, payload, grow, fill_closed, focus)
+        inferred = suggest_prompt(runtime, payload, grow, fill_closed, change_background)
         instruction = inferred
-    prompt = editing_prompt(instruction, modes, focus)
+    prompt = editing_prompt(instruction, modes, change_background)
     if progress is not None:
         progress(.02, desc="Loading local models")
     with runtime._PIPELINE_LOCK:
@@ -242,10 +233,10 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     metadata.add_text("prompt", prompt)
     metadata.add_text("seed", str(used_seed))
     metadata.add_text("tools", ", ".join(modes))
-    metadata.add_text("focus", focus)
+    metadata.add_text("change_background", str(bool(change_background)).lower())
     result.save(filename, pnginfo=metadata)
     status = (f"Saved `{filename.name}`  \nSeed: `{used_seed}` | Time: `{time.perf_counter() - started:.1f} s` | "
-              f"Working canvas: `{width} × {height}` | Tools: `{', '.join(modes)}` | Focus: `{focus}` | Cache: `{'reused' if cache_hit else 'encoded'}`  \n"
+              f"Working canvas: `{width} × {height}` | Tools: `{', '.join(modes)}` | Background edits: `{'allowed in painted area' if change_background else 'off'}` | Cache: `{'reused' if cache_hit else 'encoded'}`  \n"
               "Original dimensions retained. Pixels outside the expanded edit area are unchanged.")
     if progress is not None:
         progress(1, desc="Saved")
@@ -256,13 +247,13 @@ def run_inpaint(runtime, payload, instruction, seed, randomize, steps, megapixel
     return (original, result), str(filename), status, str(used_seed), result
 
 
-def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
+def suggest_prompt(runtime, payload, grow, fill_closed, change_background=False):
     """Reuse the installed vision-language encoder for a short Draw & Guess suggestion."""
     original, guide, mask, crop, modes = prepare_edit(payload, grow, fill_closed)
     import torch
 
-    if focus not in FOCUS_CHOICES:
-        raise ValueError("Choose a valid Inpaint focus.")
+    background_rule = ("The background may change inside the marked area."
+                       if change_background else "Keep the original background unchanged.")
     message = (
         "These images show an original photo followed by the same photo with editing marks. "
         "Green strokes sketch an object to add; red/pink strokes mark an object to remove; "
@@ -272,7 +263,7 @@ def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
         "Write ONE short image-edit instruction "
         "describing the intended change, using concrete object names. Do not describe the "
         "marks themselves. Do not include explanations. Active tools: " + ", ".join(modes) +
-        ". Editing focus: " + focus + "."
+        ". " + background_rule
     )
     if modes == ["remove"]:
         message = (
@@ -284,7 +275,7 @@ def suggest_prompt(runtime, payload, grow, fill_closed, focus="Default"):
             "Do not say 'remove the red marks' or 'remove the selected region'. "
             "Do not add an object. For clothing edits, describe replacement clothing. "
             "For accessories, restore the underlying appearance. "
-            "Return only the edit instruction. Editing focus: " + focus + "."
+            "Return only the edit instruction. " + background_rule
         )
     images = [original.crop(crop), guide.crop(crop)]
     for img in images:
@@ -328,9 +319,9 @@ def build_inpaint_ui(gr, runtime):
             elem_id="ggf-inpaint-canvas", scale=4, min_width=440,
         )
         with gr.Column(scale=1, min_width=200):
-            focus = gr.Radio(FOCUS_CHOICES, value="Default", label="Focus",
-                             info="Steers the edit inside the painted area.")
-            gr.Markdown("For clothing changes, describe the replacement in the prompt below.",
+            change_background = gr.Checkbox(False, label="Change background in painted area",
+                                            info="Off by default. Turn on when you want to edit the setting; paint the area to change.")
+            gr.Markdown("Describe the replacement for clothing or other removed objects in the prompt below.",
                         elem_classes="ggf-guide")
     payload = gr.JSON(value={}, visible=False)
     instruction = gr.Textbox(label="What should change?", lines=2,
@@ -377,18 +368,18 @@ def build_inpaint_ui(gr, runtime):
     }"""
 
     def generate_edit(data, text, seed_value, random_seed, step_count, resolution, growth,
-                      softness, fill, resident, chosen_focus, progress=gr.Progress()):
+                      softness, fill, resident, change_scene, progress=gr.Progress()):
         result = run_inpaint(runtime, data, text, seed_value, random_seed, step_count,
-                             resolution, growth, softness, fill, resident, chosen_focus,
+                             resolution, growth, softness, fill, resident, change_scene,
                              progress=progress)
         return (*result, gr.update(interactive=True))
 
     generate.click(generate_edit,
-                   inputs=[payload, instruction, seed, randomize, steps, megapixels, grow, feather, fill_closed, keep_gpu, focus],
+                   inputs=[payload, instruction, seed, randomize, steps, megapixels, grow, feather, fill_closed, keep_gpu, change_background],
                    outputs=[comparison, saved, status, used_seed, result_state, accept],
                    js=capture_js, concurrency_id="gpu", api_name="inpaint")
-    guess.click(lambda data, growth, fill, chosen_focus: suggest_prompt(runtime, data, growth, fill, chosen_focus),
-                inputs=[payload, grow, fill_closed, focus], outputs=[instruction], js=capture_js,
+    guess.click(lambda data, growth, fill, change_scene: suggest_prompt(runtime, data, growth, fill, change_scene),
+                inputs=[payload, grow, fill_closed, change_background], outputs=[instruction], js=capture_js,
                 concurrency_id="gpu", api_name="guess_inpaint_prompt")
 
     def preview_edit(data, growth, fill):
