@@ -728,7 +728,9 @@ def build_likeness_ui(gr):
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
     )
     last_result = gr.State(None)
-    reuse_result = gr.Button("Use result as new body reference", interactive=False)
+    with gr.Row():
+        reuse_result = gr.Button("Use result as new body reference", interactive=False)
+        send_to_inpaint = gr.Button("Edit result in Inpaint", interactive=False)
     reuse_result.click(fn=result_as_body_input, inputs=[last_result],
                       outputs=[body, selected_only], api_name=False)
     gr.Markdown(
@@ -771,20 +773,19 @@ def build_likeness_ui(gr):
     status = gr.Markdown(elem_classes="ggf-status")
     saved_file = gr.File(label="Saved PNG", elem_classes="ggf-download")
     used_seed = gr.Textbox(label="Used seed", interactive=False)
-    send_to_inpaint = gr.Button("Open result in Inpaint")
     release = gr.Button("Release models / free GPU memory")
     release.click(fn=release_models, inputs=[], outputs=[status], concurrency_id="gpu")
     def generate_transfer(*args):
         result = run_swap_ui(*args)
-        return (*result, result[0][1], gr.update(interactive=True))
+        return (*result, result[0][1], gr.update(interactive=True), gr.update(interactive=True))
 
     generate.click(
         fn=generate_transfer,
         inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
                 working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather, mask_mode],
-        outputs=[output, saved_file, status, used_seed, last_result, reuse_result], concurrency_id="gpu",
+        outputs=[output, saved_file, status, used_seed, last_result, reuse_result, send_to_inpaint], concurrency_id="gpu",
     )
-    return output, send_to_inpaint
+    return last_result, send_to_inpaint
 
 
 def build_ui():
@@ -809,16 +810,16 @@ def build_ui():
                         elem_classes="warning")
             with gr.Tabs() as tabs:
                 with gr.Tab("Likeness Transfer", id="likeness"):
-                    likeness_output, send_to_inpaint = build_likeness_ui(gr)
+                    likeness_result, send_to_inpaint = build_likeness_ui(gr)
                 with gr.Tab("Inpaint", id="inpaint"):
                     inpaint_canvas = build_inpaint_ui(gr, sys.modules[__name__])
 
-            def open_inpaint(pair):
-                if pair is None or pair[1] is None:
+            def open_inpaint(result):
+                if result is None:
                     raise ValueError("Generate a likeness result first.")
-                return {"load_image": image_data_url(pair[1])}, gr.update(selected="inpaint")
+                return {"load_image": image_data_url(result)}, gr.update(selected="inpaint")
 
-            send_to_inpaint.click(open_inpaint, inputs=[likeness_output], outputs=[inpaint_canvas, tabs], api_name=False)
+            send_to_inpaint.click(open_inpaint, inputs=[likeness_result], outputs=[inpaint_canvas, tabs], api_name=False)
             gr.HTML(
                 '<footer class="ggf-footer">Runs on your computer by default. Interface packaged by '
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">Get Going Fast</a>. '

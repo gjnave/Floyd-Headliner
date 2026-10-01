@@ -41,6 +41,7 @@ class AppHelperTests(unittest.TestCase):
         self.assertIs(generate.outputs[4], reuse.inputs[0])
         self.assertIsInstance(reuse.inputs[0], gr.State)
         self.assertFalse(generate.outputs[5].interactive)
+        self.assertFalse(generate.outputs[6].interactive)
         self.assertIs(reuse.outputs[0], generate.inputs[0])
         self.assertIs(reuse.outputs[1], generate.inputs[12])
         original = Image.new("RGB", (20, 20), "blue")
@@ -50,9 +51,24 @@ class AppHelperTests(unittest.TestCase):
                 values = generate.fn()
             self.assertIs(values[4], result)
             self.assertTrue(values[5]["interactive"])
+            self.assertTrue(values[6]["interactive"])
             editor, selected = reuse.fn(values[4])
             self.assertEqual(editor["background"].tobytes(), result.tobytes())
             self.assertFalse(selected)
+
+    def test_inpaint_button_receives_latest_likeness_result(self):
+        import sys
+        import gradio as gr
+        with patch.dict(sys.modules, {APP.__name__: APP}):
+            ui = APP.build_ui()
+        generate = next(event for event in ui.fns.values() if event.name == "generate_transfer")
+        open_inpaint = next(event for event in ui.fns.values() if event.name == "open_inpaint")
+        self.assertIs(generate.outputs[4], open_inpaint.inputs[0])
+        self.assertIsInstance(open_inpaint.inputs[0], gr.State)
+        result = Image.new("RGB", (20, 20), "green")
+        canvas_value, tab_update = open_inpaint.fn(result)
+        self.assertTrue(canvas_value["load_image"].startswith("data:image/png;base64,"))
+        self.assertEqual(tab_update["selected"], "inpaint")
 
     def test_protect_hides_reference_and_restores_original_pixels(self):
         original = Image.new("RGB", (100, 80), "blue")
