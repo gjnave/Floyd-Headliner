@@ -301,6 +301,13 @@ def run_swap_ui(*args):
     return (original, result), path, status, str(used_seed)
 
 
+def result_as_body_input(result):
+    """Reuse the session's last result without carrying a painted mask forward."""
+    if result is None:
+        raise ValueError("Generate a likeness result first.")
+    return {"background": result.copy(), "layers": [], "composite": result.copy()}, False
+
+
 def model_profile() -> str:
     import os
 
@@ -688,6 +695,10 @@ def build_likeness_ui(gr):
         type="pil", format="png", interactive=False,
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
     )
+    last_result = gr.State(None)
+    reuse_result = gr.Button("Use result as new body reference", interactive=False)
+    reuse_result.click(fn=result_as_body_input, inputs=[last_result],
+                      outputs=[body, selected_only], api_name=False)
     gr.Markdown(
         "**Edit painted area:** paint the intended head; only that area changes. "
         "**Protect painted area (experimental):** paint the heads to keep; the model sees them covered, "
@@ -731,11 +742,15 @@ def build_likeness_ui(gr):
     send_to_inpaint = gr.Button("Open result in Inpaint")
     release = gr.Button("Release models / free GPU memory")
     release.click(fn=release_models, inputs=[], outputs=[status], concurrency_id="gpu")
+    def generate_transfer(*args):
+        result = run_swap_ui(*args)
+        return (*result, result[0][1], gr.update(interactive=True))
+
     generate.click(
-        fn=run_swap_ui,
+        fn=generate_transfer,
         inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
                 working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather, mask_mode],
-        outputs=[output, saved_file, status, used_seed], concurrency_id="gpu",
+        outputs=[output, saved_file, status, used_seed, last_result, reuse_result], concurrency_id="gpu",
     )
     return output, send_to_inpaint
 

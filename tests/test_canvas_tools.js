@@ -29,16 +29,39 @@ function stroke() {
   nodes['.paint-canvas'].events.pointerup();
   return host.getDrawing().strokes.at(-1);
 }
+assert.equal(nodes['.paint-color'].value,'#00e676');
 buttons.find(b=>b.dataset.tool==='remove').events.click();
 assert.equal(nodes['.paint-color'].disabled,true);
+assert.equal(nodes['.paint-color'].value,'#ff2d55');
 // Even a programmatic color event must not change a Remove stroke into Color.
 nodes['.paint-color'].value='#6633ff'; nodes['.paint-color'].events.input();
 assert.equal(stroke().tool,'remove');
+assert.equal(nodes['.paint-color'].value,'#ff2d55');
 buttons.find(b=>b.dataset.tool==='color').events.click();
 assert.equal(nodes['.paint-color'].disabled,false);
+assert.equal(nodes['.paint-color'].value,'#42a5f5');
+nodes['.paint-color'].value='#6633ff'; nodes['.paint-color'].events.input();
 assert.equal(stroke().tool,'color');
 assert.equal(stroke().color,'#6633ff');
 buttons.find(b=>b.dataset.tool==='add').events.click();
 assert.equal(stroke().tool,'add');
+assert.equal(nodes['.paint-color'].value,'#00e676');
 assert.match(nodes['.paint-tool-status'].textContent,/ADD/);
-console.log('PASS: first selected color is used; changing color cannot switch Remove or Add.');
+buttons.find(b=>b.dataset.tool==='color').events.click();
+assert.equal(nodes['.paint-color'].value,'#6633ff');
+buttons.find(b=>b.dataset.tool==='erase').events.click();
+assert.equal(nodes['.paint-color'].disabled,true);
+assert.equal(stroke().tool,'erase');
+// Symbols are distinct geometry, and only decorate the browser overlay.
+for (const [tool, expected] of [['add',2],['remove',1],['color',0],['erase',0]]) {
+  sandbox.markerTool = tool;
+  assert.equal(vm.runInContext(`(() => {
+    let lines=0;
+    const ctx={beginPath(){},moveTo(){},lineTo(){lines++;},stroke(){}};
+    drawToolMarkers(ctx,{tool:markerTool,size:20,points:[[.5,.5],[.51,.51]]});
+    return lines;
+  })()`,sandbox),expected);
+}
+assert.equal(host.getDrawing().image,'fixture');
+assert.deepEqual(Object.keys(host.getDrawing()).sort(),['image','strokes']);
+console.log('PASS: active swatches, remembered color, Add/Remove symbols, clean drawing payload.');

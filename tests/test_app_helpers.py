@@ -15,6 +15,45 @@ SPEC.loader.exec_module(APP)
 
 
 class AppHelperTests(unittest.TestCase):
+    def test_reuse_result_preserves_pixels_and_clears_selection(self):
+        result = Image.new("RGB", (80, 100), "blue")
+        editor, selected = APP.result_as_body_input(result)
+        self.assertFalse(selected)
+        self.assertEqual(editor["layers"], [])
+        self.assertFalse(APP.has_painted_mask(editor))
+        for key in ("background", "composite"):
+            self.assertEqual(editor[key].size, result.size)
+            self.assertEqual(editor[key].tobytes(), result.tobytes())
+            self.assertIsNot(editor[key], result)
+        editor["background"].putpixel((0, 0), (255, 0, 0))
+        self.assertEqual(result.getpixel((0, 0)), (0, 0, 255))
+
+    def test_reuse_requires_successful_result(self):
+        with self.assertRaisesRegex(ValueError, "Generate a likeness result first"):
+            APP.result_as_body_input(None)
+
+    def test_reuse_button_receives_latest_generated_image_from_session_state(self):
+        import gradio as gr
+        with gr.Blocks() as ui:
+            APP.build_likeness_ui(gr)
+        generate = next(event for event in ui.fns.values() if event.name == "generate_transfer")
+        reuse = next(event for event in ui.fns.values() if event.name == "result_as_body_input")
+        self.assertIs(generate.outputs[4], reuse.inputs[0])
+        self.assertIsInstance(reuse.inputs[0], gr.State)
+        self.assertFalse(generate.outputs[5].interactive)
+        self.assertIs(reuse.outputs[0], generate.inputs[0])
+        self.assertIs(reuse.outputs[1], generate.inputs[12])
+        original = Image.new("RGB", (20, 20), "blue")
+        for color in ("red", "green"):
+            result = Image.new("RGB", (20, 20), color)
+            with patch.object(APP, "run_swap_ui", return_value=((original, result), "out.png", "done", "42")):
+                values = generate.fn()
+            self.assertIs(values[4], result)
+            self.assertTrue(values[5]["interactive"])
+            editor, selected = reuse.fn(values[4])
+            self.assertEqual(editor["background"].tobytes(), result.tobytes())
+            self.assertFalse(selected)
+
     def test_protect_hides_reference_and_restores_original_pixels(self):
         original = Image.new("RGB", (100, 80), "blue")
         painted = Image.new("L", original.size)

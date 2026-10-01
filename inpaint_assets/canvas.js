@@ -10,12 +10,15 @@ let photo = null, source = null, strokes = [], redo = [], active = null;
 let tool = 'add', hidden = false, zoom = 1, uploading = false, loadVersion = 0;
 const q = (selector) => element.querySelector(selector);
 const brushSize = () => Number(q('.paint-size').value);
+let selectedColor = q('.paint-color').value;
+const guideColors = {add:'#00e676', remove:'#ff2d55', erase:'#ffffff'};
 
 function setTool(next) {
   tool = next;
   element.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
   q('.paint-color').disabled = tool !== 'color';
-  q('.paint-color').title = tool === 'color' ? 'Desired color for Color strokes' : 'Select Color to recolor an object. Add and Remove use fixed guide colors.';
+  q('.paint-color').value = tool === 'color' ? selectedColor : guideColors[tool];
+  q('.paint-color').title = ({add:'Green + marks: add a shape', remove:'Pink − marks: remove an object', color:'Choose the desired color', erase:'Eraser clears marks; it does not paint white'})[tool];
   q('.paint-tool-status').textContent = ({add:'ADD: sketch a new shape', remove:'REMOVE: paint the object to erase', color:'COLOR: paint the desired color', erase:'ERASER: clear brush marks'})[tool];
 }
 
@@ -29,7 +32,7 @@ function drawStroke(ctx, stroke) {
   if (!points.length) return;
   ctx.save();
   ctx.globalCompositeOperation = stroke.tool === 'erase' ? 'destination-out' : 'source-over';
-  ctx.strokeStyle = stroke.tool === 'add' ? '#00e676' : stroke.tool === 'remove' ? '#ff2d55' : stroke.color;
+  ctx.strokeStyle = guideColors[stroke.tool] || stroke.color;
   ctx.fillStyle = ctx.strokeStyle;
   ctx.globalAlpha = stroke.tool === 'remove' ? .8 : 1;
   ctx.lineWidth = stroke.size;
@@ -40,7 +43,27 @@ function drawStroke(ctx, stroke) {
   if (points.length === 1) {
     ctx.beginPath(); ctx.arc(points[0][0] * (canvas.width - 1), points[0][1] * (canvas.height - 1), stroke.size / 2, 0, Math.PI * 2); ctx.fill();
   }
+  drawToolMarkers(ctx, stroke);
   ctx.restore();
+}
+// Screen-only symbols: getDrawing() exports original pixels and stroke data,
+// never this decorated canvas. Eraser/undo/hide affect these with the strokes.
+function drawToolMarkers(ctx, stroke) {
+  if (stroke.tool !== 'add' && stroke.tool !== 'remove') return;
+  const radius = Math.max(3, Math.min(8, stroke.size * .18));
+  const spacing = Math.max(24, stroke.size * 1.3);
+  let last = null;
+  ctx.globalAlpha = 1;
+  for (const point of stroke.points) {
+    const x = point[0] * (canvas.width - 1), y = point[1] * (canvas.height - 1);
+    if (last && Math.hypot(x - last[0], y - last[1]) < spacing) continue;
+    last = [x, y];
+    ctx.beginPath();
+    ctx.moveTo(x - radius, y); ctx.lineTo(x + radius, y);
+    if (stroke.tool === 'add') {ctx.moveTo(x, y - radius); ctx.lineTo(x, y + radius);}
+    ctx.strokeStyle = '#091425'; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+  }
 }
 function render() {
   if (!photo) return;
@@ -98,7 +121,11 @@ element.querySelectorAll('[data-tool]').forEach(button => button.addEventListene
   setTool(button.dataset.tool);
 }));
 // Picking a color must never turn Remove into Color behind the user's back.
-q('.paint-color').addEventListener('input', () => controls());
+q('.paint-color').addEventListener('input', () => {
+  if (tool === 'color') selectedColor = q('.paint-color').value;
+  setTool(tool);
+  controls();
+});
 setTool('add');
 q('.paint-size').addEventListener('input', () => {q('.size-value').textContent = brushSize();});
 const point = (event) => {const rect = canvas.getBoundingClientRect(); return [Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))];};
