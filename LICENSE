@@ -1,20 +1,67 @@
-Floyd Headliner
-Copyright (C) 2026 Get Going Fast
+Floyd Headliner Community License 1.0
+Copyright (c) 2026 Get Going Fast. All rights reserved except as granted below.
 
-Floyd Headliner is free software: you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option)
-any later version.
+1. Scope
 
-Floyd Headliner is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-more details.
+This license applies only to the Floyd Headliner application code and
+documentation that Get Going Fast owns and distributes with this license
+(the "Software"). It does not license third-party code, libraries, model
+weights, adapters, datasets, images, or trademarks. Those retain their own
+terms. In particular, this license does not grant commercial rights to the
+Qwen Image 2.1 model or the Viggle adapter.
 
-You should have received a copy of the GNU General Public License along with
-Floyd Headliner. If not, see <https://www.gnu.org/licenses/>.
+2. Permission to use and improve
 
-The complete GNU General Public License version 3 text is in COPYING.
+You may use, study, copy, modify, and share the Software, including modified
+versions, without paying Get Going Fast. You may publish your changes, create
+forks, and propose contributions to the official project. These permissions
+are worldwide, non-exclusive, and royalty-free, subject to the conditions and
+paid-distribution restriction below.
 
-This grant applies to Floyd Headliner's own app code and documentation, not to
-third-party model weights, adapters, dependencies, or their separate licenses.
+3. Paid distribution reserved
+
+Only Get Going Fast may sell or charge for the Software without a separate
+written agreement from Get Going Fast. You may not require payment, a purchase,
+a subscription, or a mandatory donation to obtain a copy of the Software or a
+modified version. You may not include either in a paid bundle or sell hosted
+access whose primary purpose is providing access to the Software. You may not
+authorize someone else to do any of these things. You may share copies and
+modified versions free of charge.
+
+This section restricts selling or charging for access to the Software; it does
+not, by itself, restrict ordinary use of the Software by a business. Any such
+use remains subject to applicable third-party licenses, especially the model
+licenses. Rights in images or other output are not granted by this license.
+
+4. Conditions for sharing
+
+When you share the Software or a modified version, you must include this
+license, retain existing copyright and attribution notices, clearly identify
+your changes, and apply this same license to the Software portions you share.
+You may not claim that Get Going Fast endorses your version.
+
+5. Contributions
+
+You retain ownership of your own contributions. Submitting a contribution
+does not transfer your copyright or grant Get Going Fast commercial rights to
+it. Before incorporating a contribution into a version it sells, Get Going
+Fast must obtain a separate written commercial permission from its owner.
+
+6. Reserved rights and termination
+
+Get Going Fast reserves every right not expressly granted here, including the
+right to offer its own Software under separate commercial terms. This license
+does not grant rights to the Floyd Headliner or Get Going Fast names, logos, or
+other trademarks. If you violate these terms, your license ends unless you
+correct the violation within 30 days after receiving notice of it.
+
+7. No warranty or liability
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NONINFRINGEMENT. TO THE EXTENT PERMITTED BY LAW, GET GOING FAST IS NOT LIABLE
+FOR DAMAGES ARISING FROM THE SOFTWARE OR ITS USE.
+
+This is a source-available license, not an open-source license. Earlier
+versions released under the GNU GPL remain subject to their existing GPL
+grants; this license does not revoke them.

@@ -227,10 +227,16 @@ Floyd Headliner is named in honor of the legend Count Floyd
 
 ## License
 
-Floyd Headliner's own app code and documentation are available under the
-[GNU General Public License, version 3 or later](LICENSE); the complete GPLv3
-text is in [COPYING](COPYING). Third-party models, adapters, and dependencies
-remain under their respective licenses.
+Floyd Headliner's own app code and documentation are source-available under the
+[Floyd Headliner Community License 1.0](LICENSE). You may use, modify, and
+share them for free; only Get Going Fast may sell or charge for the app without
+separate written permission. This is not an open-source license. The earlier
+GPL text is retained for historical revisions in
+[COPYING.GPL-HISTORICAL](COPYING.GPL-HISTORICAL); previously granted GPL rights
+remain in effect for those revisions. Contributions remain their authors'
+property and need separate commercial permission before inclusion in a paid
+version. Third-party models, adapters, and dependencies keep their own terms;
+the Qwen and Viggle model licenses do not grant commercial model use by default.
 
 ## Source and Hosting Notice
 Get Going Fast provides community setup guidance, documentation, tutorials, troubleshooting support, and member services. Get Going Fast does not sell, host, store, mirror, or redistribute AI model files, model weights, training datasets, or the third-party applications our guides cover. Those always come from their own official upstream sources.
