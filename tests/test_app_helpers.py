@@ -67,6 +67,41 @@ class AppHelperTests(unittest.TestCase):
         self.assertEqual(result.getpixel((80, 60)), (255, 0, 0))
         delta = APP.ImageChops.difference(original, result)
         self.assertIsNone(APP.ImageChops.multiply(delta, protected.convert("RGB")).getbbox())
+
+    def test_protect_focuses_opposite_side_for_two_people(self):
+        original = Image.new("RGBA", (200, 100), "blue")
+        class FakePipe:
+            fast_resident = False
+            prompt_cache_hit = False
+            def set_adapters(self, *args, **kwargs): pass
+            def __call__(self, **kwargs):
+                self.request = kwargs
+                return SimpleNamespace(images=[Image.new("RGB", (64, 64), "red")])
+        for protected_box, untouched, changed in [
+            ((15, 5, 65, 85), (35, 40), (165, 40)),
+            ((135, 5, 185, 85), (165, 40), (35, 40)),
+        ]:
+            layer = Image.new("RGBA", original.size)
+            layer.paste((245, 185, 66, 255), protected_box)
+            pipe = FakePipe()
+            with patch.object(APP, "_load_pipeline", return_value=pipe), \
+                    patch("torch.Generator"), patch.object(Image.Image, "save"), \
+                    patch("torch.cuda.empty_cache"):
+                result, _, status, _ = APP.run_swap(
+                    {"background": original, "layers": [layer]}, Image.new("RGB", (32, 32)),
+                    APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 2, False,
+                    selected_only=False, mask_mode="Protect painted area (experimental)", feather=0)
+            self.assertLess(pipe.request["image"][0].width, original.width)
+            self.assertEqual(result.size, original.size)
+            self.assertEqual(result.getpixel(untouched), (0, 0, 255))
+            self.assertEqual(result.getpixel(changed), (255, 0, 0))
+            self.assertIn("unprotected side", status)
+
+    def test_protect_mode_rejects_missing_mask(self):
+        with self.assertRaisesRegex(ValueError, "Paint over the head to protect"):
+            APP.run_swap(Image.new("RGB", (100, 80)), Image.new("RGB", (32, 32)),
+                         APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 1,
+                         mask_mode="Protect painted area (experimental)")
     def test_generate_editor_preprocessing_retries_incomplete_png(self):
         expected = {"background": Image.new("RGBA", (20, 20)), "layers": []}
         original = Mock(side_effect=[OSError("image file is truncated"),

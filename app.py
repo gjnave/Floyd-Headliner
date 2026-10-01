@@ -294,6 +294,21 @@ def protected_reference(original, painted):
     return reference, protected
 
 
+def unprotected_side_crop(protected):
+    """Isolate the other side when a protected person is clearly at one edge."""
+    width, height = protected.size
+    left, _, right, _ = protected.getbbox()
+    gap = max(8, round(width * .02))
+    left_end = max(0, left - gap)
+    right_start = min(width, right + gap)
+    minimum = max(64, round(width * .35))
+    if width - right_start >= minimum and width - right_start >= left_end * 1.25:
+        return (right_start, 0, width, height)
+    if left_end >= minimum and left_end >= (width - right_start) * 1.25:
+        return (0, 0, left_end, height)
+    return None
+
+
 def run_swap_ui(*args):
     result, path, status, used_seed = run_swap(*args)
     original, _, _ = prepare_selection(args[0])
@@ -599,19 +614,34 @@ def run_swap(
 
     import torch
 
+    # The editor's decoded layers are the source of truth. Its asynchronous
+    # checkbox update can lag behind a final brush stroke and the Generate click.
+    selected_only = bool(selected_only or has_painted_mask(body_image))
     original, mask, crop = prepare_selection(body_image, selected_only)
     if mask_mode not in ("Edit painted area", "Protect painted area (experimental)"):
         raise ValueError("Choose a valid painted-area mode.")
+    if mask_mode == "Protect painted area (experimental)" and not selected_only:
+        raise ValueError("Paint over the head to protect before generating.")
     protect = selected_only and mask_mode == "Protect painted area (experimental)"
     if protect:
         body, protected = protected_reference(original, mask)
-        crop = (0, 0, original.width, original.height)
+        side_crop = unprotected_side_crop(protected)
+        if side_crop:
+            crop = side_crop
+            body = original.crop(crop)
+        else:
+            crop = (0, 0, original.width, original.height)
         mask = ImageOps.invert(protected)
-        if mask.getbbox() is None:
-            raise ValueError("Leave the target head unpainted; the entire image is protected.")
-        effective_prompt += ("\nThe flat gray covered regions in <image1> hide protected heads. "
-                             "Transfer the reference likeness only to the remaining visible head. "
-                             "Do not create a new head in the covered regions.")
+        if mask.crop(crop).getbbox() is None:
+            raise ValueError("Leave the target head unpainted; the entire working area is protected.")
+        if side_crop:
+            effective_prompt += ("\n<image1> is the unprotected person cropped from the group photo. "
+                                 "Transfer the reference likeness to that visible person's head. "
+                                 "Keep their pose, clothing, and surroundings.")
+        else:
+            effective_prompt += ("\nThe flat gray covered regions in <image1> hide protected heads. "
+                                 "Transfer the reference likeness only to the remaining visible head. "
+                                 "Do not create a new head in the covered regions.")
     else:
         body = original.crop(crop) if crop else original
     head = ImageOps.exif_transpose(head_image).convert("RGB")
@@ -661,7 +691,9 @@ def run_swap(
         f"Reference/prompt cache: `{'reused' if pipe.prompt_cache_hit else 'encoded'}`"
     )
     if protect:
-        status += "  \nProtect experiment: painted heads hidden from the model, then restored from the original."
+        status += ("  \nProtect experiment: " +
+                   ("model focused on the unprotected side; " if side_crop else "painted heads hidden from the model; ") +
+                   "protected pixels restored from the original.")
     elif selected_only:
         status += "  \nPainted-area edit: original dimensions retained; unpainted pixels unchanged."
     return result, str(output_path), status, used_seed
@@ -676,7 +708,7 @@ def build_likeness_ui(gr):
     selected_only = gr.Checkbox(label="Use painted mask (painting enables this)", value=False)
     mask_mode = gr.Radio(["Edit painted area", "Protect painted area (experimental)"],
                         value="Edit painted area", label="Painted area",
-                        info="Protect: cover the entire head you want kept, including hair. Leave the target head visible.")
+                        info="Protect: cover the entire head you want kept, including hair. For two people, the model focuses on the opposite side.")
     with gr.Row():
         body = gr.ImageEditor(
             type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
@@ -701,8 +733,8 @@ def build_likeness_ui(gr):
                       outputs=[body, selected_only], api_name=False)
     gr.Markdown(
         "**Edit painted area:** paint the intended head; only that area changes. "
-        "**Protect painted area (experimental):** paint the heads to keep; the model sees them covered, "
-        "then their original pixels are restored. Everything else can change. "
+        "**Protect painted area (experimental):** paint the heads to keep. When they are on one side, "
+        "the model works on the other side; protected pixels are restored. Everything else can change. "
         "Leave one target head visible. Painting enables the mask; clearing it turns the mask off.",
         elem_classes="ggf-guide",
     )
