@@ -17,10 +17,11 @@ const nodes = Object.fromEntries(['.paint-canvas','.paint-viewport','.paint-info
 nodes['.paint-size'].value = '20'; nodes['.paint-color'].value = '#42a5f5';
 const buttons = ['add','remove','color','erase'].map(tool => Object.assign(widget(),{dataset:{tool}}));
 const host = {};
+const emitted = [];
 const sandbox = vm.createContext({
   element:{closest:()=>host, querySelector:s=>nodes[s], querySelectorAll:()=>buttons},
   document:{createElement:()=>widget()},
-  ResizeObserver:class{observe(){}}, watch(){}, trigger(){}, props:{}, structuredClone,
+  ResizeObserver:class{observe(){}}, watch(){}, trigger(name){emitted.push(name);}, props:{}, structuredClone,
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../inpaint_assets/canvas.js'),'utf8'),sandbox);
 vm.runInContext("photo={width:100,height:100}; source='fixture'; canvas.width=canvas.height=100",sandbox);
@@ -36,6 +37,7 @@ assert.equal(nodes['.paint-color'].value,'#ff2d55');
 // Even a programmatic color event must not change a Remove stroke into Color.
 nodes['.paint-color'].value='#6633ff'; nodes['.paint-color'].events.input();
 assert.equal(stroke().tool,'remove');
+assert.equal(emitted.at(-1),'change');
 assert.equal(nodes['.paint-color'].value,'#ff2d55');
 buttons.find(b=>b.dataset.tool==='color').events.click();
 assert.equal(nodes['.paint-color'].disabled,false);
@@ -52,6 +54,7 @@ assert.equal(nodes['.paint-color'].value,'#6633ff');
 buttons.find(b=>b.dataset.tool==='erase').events.click();
 assert.equal(nodes['.paint-color'].disabled,true);
 assert.equal(stroke().tool,'erase');
+assert.equal(emitted.filter(name=>name==='change').length,5);
 // Symbols are distinct geometry, and only decorate the browser overlay.
 for (const [tool, expected] of [['add',2],['remove',1],['color',0],['erase',0]]) {
   sandbox.markerTool = tool;

@@ -109,11 +109,18 @@ turn the checkbox on and paint the area to change. Pixels outside the painted ed
 area are always restored from the original. For clothing changes, describe the
 replacement garment in the prompt.
 
+The Inpaint result appears beside the drawing canvas. A new brush stroke clears
+the edit prompt so an old instruction cannot carry into the next mask; check
+**Keep prompt** beside the text box to reuse it. A blank prompt identifies the
+intended edit and uses that instruction in the same generation click. Brush
+overlay colors for Add and Remove are visual markers, not requested output
+colors. The **Color** tool still uses the color you select.
+
 The brush toolbar always shows the active tool. Add uses green selection marks;
 Remove uses pink selection marks. Choose **Color** explicitly to recolor, then
 choose its desired color. The color picker no longer switches tools. For a
-Remove-only edit, leaving the prompt blank first asks the vision encoder to name
-the selected object. The generated instruction is shown below the result. Remove
+edit with a blank prompt, the vision encoder supplies a concrete instruction in
+the same Generate click. The instruction is shown below the result. Remove
 then uses the original image and a black-and-white selection instead of a pink
 guide image. It may still misidentify an object; a specific written instruction
 overrides the automatic guess. This Qwen editing path does not use MagicQuill's

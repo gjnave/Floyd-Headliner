@@ -144,12 +144,12 @@ canvas.addEventListener('pointermove', event => {
   if (active.points.length < 10000) active.points.push(next);
   render();
 });
-function finish() {if(active) {strokes.push(active); active=null; redo=[]; render();}}
+function finish() {if(active) {strokes.push(active); active=null; redo=[]; render(); trigger('change');}}
 canvas.addEventListener('pointerup', finish);
 canvas.addEventListener('pointercancel', finish);
 canvas.addEventListener('lostpointercapture', finish);
 function undoStroke() {finish(); if (strokes.length) {redo.push(strokes.pop()); render();}}
-function redoStroke() {if (redo.length) {strokes.push(redo.pop()); render();}}
+function redoStroke() {if (redo.length) {strokes.push(redo.pop()); render(); trigger('change');}}
 q('.paint-undo').addEventListener('click', undoStroke);
 q('.paint-redo').addEventListener('click', redoStroke);
 q('.paint-clear').addEventListener('click', () => {strokes=[]; redo=[]; active=null; render();});
