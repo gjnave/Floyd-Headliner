@@ -109,6 +109,9 @@ also change details outside the requested object. No drawing or mask is used.
 Inpaint runs the base Qwen Image 2.1 model with both LoRAs disabled. Its default
 is 40 steps because the six-step setting depends on the Viggle Turbo LoRA.
 The BFS and Viggle Turbo LoRAs remain available in Likeness Transfer.
+On a standard-profile installation, Inpaint now uses the same app-local Qwen
+inference core as Fast core likeness transfer. Low-VRAM profiles retain their
+existing Diffusers offload path until the core is validated on those GPUs.
 
 ### Optional fast likeness engine
 
@@ -117,16 +120,16 @@ On a standard-profile installation with the app-local fast-core model files,
 Likeness-transfer engine** offers **Fast core** and **Standalone**. Fast core
 is selected by default when detected. The same body/head inputs, prompts,
 before/after slider, painted-area controls, result reuse, and Inpaint tab
-remain in the existing interface. Inpaint still uses the standalone base model
-with no LoRAs. Switching between Fast core and Inpaint releases the other
-engine's GPU models before loading a second set.
+remain in the existing interface. On the standard profile, Inpaint uses this
+same loaded core with both LoRAs off. Switching operations changes the model
+adapter selection without starting a second app or server.
 
-Fast core is optional and currently experimental. Its source modules are in
+The app-local core is currently experimental. Its source modules are in
 `vendor/comfy_core/` and run under this app's `.venv`; its INT8 model and text
 encoder plus VAE are in `models/fast-core/`. The standard-mode installer
 downloads these three model files (about 17 GB total) and reuses the existing
 BFS and Viggle LoRAs. No ComfyUI application, server, or Python environment is
-installed. Low-VRAM profiles keep the standalone engine because Fast core has
+installed. Low-VRAM profiles keep the standalone engine because the core has
 only been tested on the local RTX 4090. The embedded Comfy-derived modules are
 third-party GPLv3 code; see `vendor/comfy_core/LICENSE` and `SOURCE.md` there.
 
@@ -147,7 +150,8 @@ and changes outside the mask remain dependent on the model.
 
 ## What is reproduced
 
-- Qwen Image 2.1 direct Diffusers inference
+- Qwen Image 2.1 app-local core inference on the standard profile; Diffusers
+  remains available for likeness transfer and low-VRAM Inpaint
 - Body/base as `<image1>` and head reference as `<image2>`
 - `bfs_head_v1.1_alternative_qwen_2.1.safetensors` at strength 1.0
 - `Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors` at strength 1.0

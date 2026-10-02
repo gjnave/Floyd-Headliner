@@ -50,6 +50,12 @@ def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
     if not 0 <= used_seed < 2**63:
         raise ValueError("Seed must be between 0 and 9223372036854775807.")
 
+    if runtime.model_profile() == "standard":
+        from core_runtime import run_inpaint as run_core_inpaint
+
+        return run_core_inpaint(runtime, original, prompt, used_seed, step_count,
+                                megapixels, keep_on_gpu, progress=progress)
+
     import torch
 
     width, height = runtime.calculate_working_size(original, megapixels)
@@ -181,7 +187,8 @@ def build_inpaint_ui(gr, runtime):
     )
     release.click(runtime.release_models, outputs=[status], concurrency_id="gpu")
     gr.Markdown(
-        "Uses the base Qwen Image 2.1 model. Both LoRAs are disabled for this tab.",
+        "Uses the app-local Qwen core on the standard profile; low-VRAM profiles "
+        "keep their existing offload path. Both LoRAs are disabled for this tab.",
         elem_classes="ggf-guide",
     )
     return source

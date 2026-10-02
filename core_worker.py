@@ -32,11 +32,16 @@ DEFAULT_PROMPT = (
 )
 
 
-def required_files(model_root: Path, lora_root: Path) -> list[Path]:
+def required_base_files(model_root: Path) -> list[Path]:
     return [
         model_root / "diffusion_models" / MODEL,
         model_root / "text_encoders" / ENCODER,
         model_root / "vae" / VAE,
+    ]
+
+
+def required_files(model_root: Path, lora_root: Path) -> list[Path]:
+    return required_base_files(model_root) + [
         lora_root / BFS,
         lora_root / TURBO,
     ]
@@ -45,7 +50,7 @@ def required_files(model_root: Path, lora_root: Path) -> list[Path]:
 def validate_root(root: Path, model_root: Path, lora_root: Path) -> None:
     if not (root / "nodes.py").is_file() or not (root / "comfy_extras" / "nodes_qwen.py").is_file():
         raise RuntimeError(f"Bundled inference core not found at {root}")
-    missing = [str(path) for path in required_files(model_root, lora_root) if not path.is_file()]
+    missing = [str(path) for path in required_base_files(model_root) if not path.is_file()]
     if missing:
         raise RuntimeError("Missing workflow model files:\n" + "\n".join(missing))
 
@@ -96,7 +101,10 @@ class Engine:
         clip = nodes.CLIPLoader().load_clip(ENCODER, "qwen_image", "default")[0]
         vae = nodes.VAELoader().load_vae(VAE)[0]
         self.base_model, self.clip, self.vae = model, clip, vae
-        self.set_lora_strengths(1.0, 1.0)
+        # Plain image editing starts from the untouched model. Likeness transfer
+        # applies its adapters only when that operation is requested.
+        self.model = self.cache_node.execute(model, "auto", "default")[0]
+        self.lora_strengths = (0.0, 0.0)
         self.load_seconds = time.perf_counter() - started
 
     def set_lora_strengths(self, bfs_strength: float, turbo_strength: float) -> None:
@@ -195,6 +203,75 @@ class Engine:
             "total_seconds": round(time.perf_counter() - request_started, 2),
         }
 
+    def generate_inpaint(self, request: dict) -> dict:
+        import numpy as np
+        from PIL import Image, PngImagePlugin
+
+        request_started = time.perf_counter()
+        source_path = str(request["image_path"])
+        output_dir = Path(request["output_dir"]).resolve()
+        prompt = str(request.get("prompt") or "").strip()
+        steps = int(request.get("steps", 40))
+        resolution = int(request.get("resolution", 1024))
+        seed = int(request.get("seed", -1))
+        if not prompt:
+            raise ValueError("Type what you want to change before generating.")
+        if not 1 <= steps <= 60 or not 256 <= resolution <= 2048:
+            raise ValueError("Invalid edit steps or working resolution.")
+        if seed < 0:
+            seed = random.randrange(2**63)
+        if seed >= 2**63:
+            raise ValueError("Seed must be below 2^63.")
+
+        with Image.open(source_path) as source:
+            original_size = source.size
+        self.load()
+        self.set_lora_strengths(0.0, 0.0)
+        started = time.perf_counter()
+        stat = Path(source_path).stat()
+        cache_key = ("inpaint", str(Path(source_path).resolve()), stat.st_size,
+                     stat.st_mtime_ns, prompt, resolution)
+        cache_hit = self.conditioning_cache is not None and self.conditioning_cache[0] == cache_key
+        if cache_hit:
+            _, positive, negative, cached_latent = self.conditioning_cache
+            latent = {**cached_latent, "samples": cached_latent["samples"].clone()}
+        else:
+            image = load_image_tensor(source_path)
+            with self.torch.no_grad():
+                positive, negative, latent = self.text_node.execute(
+                    self.clip, prompt, "", vae=self.vae, resolution=resolution,
+                    images={"image_1": image},
+                )
+            self.torch.cuda.synchronize()
+            self.conditioning_cache = (cache_key, positive, negative, latent)
+        conditioning_seconds = time.perf_counter() - started
+        with self.torch.no_grad():
+            sampled = self.nodes.KSampler().sample(
+                model=self.model, seed=seed, steps=steps, cfg=1.0,
+                sampler_name="euler", scheduler="simple",
+                positive=positive, negative=negative, latent_image=latent, denoise=1.0,
+            )[0]
+            pixels = self.nodes.VAEDecode().decode(self.vae, sampled)[0][0]
+        self.torch.cuda.synchronize()
+        working_size = (pixels.shape[1], pixels.shape[0])
+        result = Image.fromarray((pixels.detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8))
+        if result.size != original_size:
+            result = result.resize(original_size, Image.Resampling.LANCZOS)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / f"floyd-inpaint-{int(time.time() * 1000)}-seed-{seed}.png"
+        metadata = PngImagePlugin.PngInfo()
+        metadata.add_text("Floyd Headliner", "App-local Qwen Image 2.1 core edit; LoRAs disabled")
+        metadata.add_text("prompt", prompt)
+        metadata.add_text("seed", str(seed))
+        result.save(output, pnginfo=metadata)
+        return {
+            "output": str(output), "seed": seed,
+            "working_size": list(working_size),
+            "conditioning_cache_hit": cache_hit,
+            "conditioning_seconds": round(conditioning_seconds, 2),
+            "total_seconds": round(time.perf_counter() - request_started, 2),
+        }
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -220,7 +297,10 @@ def main() -> int:
             request = json.loads(line)
             if request.get("command") == "stop":
                 break
-            response = {"ok": True, **engine.generate(request)}
+            if request.get("mode") == "inpaint":
+                response = {"ok": True, **engine.generate_inpaint(request)}
+            else:
+                response = {"ok": True, **engine.generate(request)}
         except Exception as error:
             response = {"ok": False, "error": str(error)}
             traceback.print_exc()

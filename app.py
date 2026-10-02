@@ -808,7 +808,7 @@ def build_likeness_ui(gr):
             value=FAST_CORE_LABEL if fast_ready else STANDALONE_LABEL,
             label="Likeness-transfer engine",
             info="Fast core uses bundled inference modules and app-local model files; "
-                 "no ComfyUI installation or server. Inpaint remains standalone.",
+                 "no ComfyUI installation or server. Standard-profile Inpaint also uses this core.",
         )
         with gr.Row():
             seed = gr.Number(label="Seed", value=42, precision=0)
@@ -909,9 +909,13 @@ def self_check() -> int:
     print(f"Diffusers: {diffusers.__version__}")
     print(f"Transformers: {transformers.__version__}")
     print(f"Gradio: {gradio.__version__}")
-    from core_runtime import available as fast_core_available
+    from core_runtime import available as fast_core_available, inpaint_available
 
-    print(f"Optional fast core: {'available' if fast_core_available() else 'not installed'}")
+    print(f"App-local Qwen core: {'available' if inpaint_available() else 'not installed'}")
+    print(f"Fast likeness engine: {'available' if fast_core_available() else 'not installed'}")
+    if model_profile() == "standard" and not inpaint_available():
+        print("Standard-profile Inpaint: INCOMPLETE (run the installer or updater)")
+        return 2
     if model_profile() != "standard":
         import bitsandbytes
 

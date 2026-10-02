@@ -21,7 +21,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from core_worker import required_files
+from core_worker import required_base_files, required_files
 
 
 HERE = Path(__file__).resolve().parent
@@ -32,11 +32,17 @@ MODEL_ROOT = Path(os.environ.get("FLOYD_CORE_MODEL_DIR", str(_LOCAL_MODELS)))
 WORKER_PYTHON = Path(os.environ.get("FLOYD_CORE_PYTHON", sys.executable))
 
 
-def available() -> bool:
+def inpaint_available() -> bool:
     return (
         WORKER_PYTHON.is_file()
         and (CORE_ROOT / "nodes.py").is_file()
-        and all(path.is_file() for path in required_files(MODEL_ROOT, LORA_ROOT))
+        and all(path.is_file() for path in required_base_files(MODEL_ROOT))
+    )
+
+
+def available() -> bool:
+    return inpaint_available() and all(
+        path.is_file() for path in required_files(MODEL_ROOT, LORA_ROOT)
     )
 
 
@@ -58,10 +64,10 @@ class Worker:
     def start(self, output_dir: Path) -> None:
         if self.process is not None and self.process.poll() is None:
             return
-        if not available():
+        if not inpaint_available():
             raise RuntimeError(
-                "Fast core needs its bundled inference modules and Qwen/BFS/Viggle "
-                "model files. Choose Standalone in Advanced settings if they are not installed."
+                "App-local Qwen core needs its bundled inference modules and model files. "
+                "Run the standard installer or updater if they are missing."
             )
         output_dir.mkdir(parents=True, exist_ok=True)
         self.log = (output_dir / "fast-core-worker.log").open("a", encoding="utf-8")
@@ -142,10 +148,57 @@ def _cached_input(image: Image.Image, output_dir: Path) -> Path:
     return path
 
 
+def run_inpaint(runtime, original: Image.Image, prompt: str, seed: int,
+                steps: int, megapixels: float, keep_on_gpu: bool, progress=None):
+    """Edit one image with the app-local Qwen core and no LoRA adapters."""
+    if not inpaint_available():
+        raise RuntimeError(
+            "Inpaint needs the app-local Qwen core models. Run the standard installer "
+            "or updater to download the missing files."
+        )
+    started = time.perf_counter()
+    resolution = round((float(megapixels) ** 0.5) * 1024 / 32) * 32
+    if progress is not None:
+        progress(.02, desc="Loading the app-local Qwen core")
+    if runtime._PIPELINE is not None:
+        runtime.release_standalone_models()
+    output_dir = runtime.OUTPUT_DIR
+    if progress is not None:
+        progress(.12, desc="Editing with the base model; LoRAs off")
+    try:
+        response = WORKER.request({
+            "mode": "inpaint",
+            "image_path": str(_cached_input(original, output_dir)),
+            "prompt": prompt,
+            "seed": int(seed),
+            "steps": int(steps),
+            "resolution": resolution,
+            "output_dir": str(output_dir),
+        }, output_dir)
+    finally:
+        if not keep_on_gpu:
+            WORKER.stop()
+    with Image.open(response["output"]) as saved:
+        result = saved.convert("RGB")
+    width, height = response["working_size"]
+    status = (
+        f"Saved {Path(response['output']).name}  \n"
+        f"Seed: {seed} | Time: {time.perf_counter() - started:.1f} s | "
+        f"Working canvas: {width} × {height} | App-local Qwen core; LoRAs off | "
+        f"Cache: {'reused' if response['conditioning_cache_hit'] else 'encoded'}  \n"
+        "Original dimensions retained. The model may change details outside the requested object."
+    )
+    if progress is not None:
+        progress(1, desc="Saved")
+    return (original, result), response["output"], status, str(seed), result
+
+
 def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
              bfs_strength, turbo_strength, steps, working_megapixels,
              output_upscale, keep_on_gpu, extra_prompt, selected_only,
              feather, mask_mode):
+    if not available():
+        raise RuntimeError("Fast likeness transfer needs both the BFS and Viggle LoRA files.")
     if body_image is None or head_image is None:
         raise ValueError("Add both the body reference and head reference.")
     if not prompt or "<image1>" not in prompt or "<image2>" not in prompt:
