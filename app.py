@@ -963,9 +963,8 @@ def build_likeness_ui(gr):
     head.upload(retain_uploaded_head, inputs=[head], outputs=[head],
                 queue=False, show_progress="hidden", api_name=False)
     extra_prompt = gr.Textbox(
-        label="Extra prompt", value="", lines=2,
+        label="Extra prompt — appended to Advanced likeness instruction", value="", lines=2,
         placeholder="For example: remove the hat; keep the head reference's hair.",
-        info="Added to the end of the likeness instruction in Advanced settings.",
     )
     turbo_generate = gr.Button("Turbo preview · half-size · Ctrl+Enter", variant="secondary",
                                elem_id="ggf-swap-turbo")
