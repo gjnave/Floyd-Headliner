@@ -128,7 +128,7 @@ def build_inpaint_ui(gr, runtime):
     )
     with gr.Row(equal_height=True):
         source = gr.Image(type="pil", height=560, label="INPUT IMAGE",
-                          scale=1, min_width=440)
+                          scale=1, min_width=440, elem_id="ggf-inpaint-source")
         comparison = gr.ImageSlider(
             type="pil", format="png", interactive=False,
             label="OUTPUT — drag to compare with the input",
@@ -136,7 +136,6 @@ def build_inpaint_ui(gr, runtime):
         )
     turbo_generate = gr.Button(
         "Turbo preview · half-size · Ctrl+Enter", variant="secondary", elem_id="ggf-inpaint-turbo",
-        visible=runtime.model_profile() == "standard",
     )
     generate = gr.Button(
         "Generate edit (full size)", variant="primary", elem_id="ggf-inpaint-button",

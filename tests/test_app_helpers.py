@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
@@ -75,13 +76,67 @@ class AppHelperTests(unittest.TestCase):
 
         open_likeness = next(event for event in ui.fns.values()
                              if event.name == "open_likeness")
+        select_likeness = next(event for event in ui.fns.values()
+                               if event.name == "select_likeness")
+        clear_likeness_input = next(event for event in ui.fns.values()
+                                    if event.name == "clear_likeness_input")
         inpaint_generate = next(event for event in ui.fns.values()
                                 if event.name == "generate_edit")
         self.assertIs(open_likeness.inputs[0], inpaint_generate.outputs[3])
-        editor, mask_enabled, tab_update = open_likeness.fn(image)
+        self.assertIs(select_likeness.inputs[0], inpaint_generate.outputs[3])
+        self.assertIs(clear_likeness_input.outputs[0], open_likeness.outputs[0])
+        dependencies = {event["id"]: event for event in ui.config["dependencies"]}
+        self.assertEqual(dependencies[clear_likeness_input._id]["trigger_after"],
+                         select_likeness._id)
+        self.assertEqual(dependencies[open_likeness._id]["trigger_after"],
+                         clear_likeness_input._id)
+        self.assertTrue(dependencies[clear_likeness_input._id]["trigger_only_on_success"])
+        self.assertTrue(dependencies[open_likeness._id]["trigger_only_on_success"])
+        self.assertEqual(select_likeness.fn(image)["selected"], "likeness")
+        self.assertIsNone(clear_likeness_input.fn())
+        editor, mask_enabled = open_likeness.fn(image)
         self.assertEqual(editor["background"].tobytes(), image.tobytes())
         self.assertFalse(mask_enabled)
-        self.assertEqual(tab_update["selected"], "likeness")
+        with self.assertRaisesRegex(ValueError, "Generate an inpaint result first"):
+            select_likeness.fn(None)
+
+    def test_likeness_turbo_button_is_above_full_size_button(self):
+        import gradio as gr
+
+        with gr.Blocks() as ui:
+            APP.build_likeness_ui(gr)
+        buttons = [component for component in ui.blocks.values()
+                   if isinstance(component, gr.Button)]
+        turbo = next(index for index, button in enumerate(buttons)
+                     if button.elem_id == "ggf-swap-turbo")
+        full_size = next(index for index, button in enumerate(buttons)
+                         if button.elem_id == "ggf-swap-button")
+        self.assertLess(turbo, full_size)
+
+    def test_all_profiles_show_turbo_buttons_and_running_mode(self):
+        import sys
+
+        labels = {
+            "standard": "Standard · 24 GB",
+            "low-vram": "Low VRAM · 16 GB target",
+            "low-vram-12gb": "Experimental · 12 GB target",
+        }
+        with patch.dict(sys.modules, {APP.__name__: APP}):
+            for profile, label in labels.items():
+                with self.subTest(profile=profile), patch.dict(os.environ, {"FLOYD_HEADLINER_PROFILE": profile}):
+                    ui = APP.build_ui()
+                    components = {component["props"].get("elem_id"): component["props"]
+                                  for component in ui.config["components"]}
+                    self.assertTrue(components["ggf-swap-turbo"]["visible"])
+                    self.assertTrue(components["ggf-inpaint-turbo"]["visible"])
+                    self.assertIn(label, str(ui.config["components"]))
+
+    def test_experimental_12gb_turbo_still_reduces_working_pixels(self):
+        with patch.dict(os.environ, {"FLOYD_HEADLINER_PROFILE": "low-vram-12gb"}):
+            image = Image.new("RGB", (1024, 1024))
+            full = APP.calculate_working_size(image, .5)
+            turbo = APP.calculate_working_size(image, APP.turbo_megapixels(.5))
+        self.assertLess(turbo[0] * turbo[1], full[0] * full[1])
 
     def test_turbo_preview_quarters_working_pixel_budget_without_changing_steps(self):
         import gradio as gr

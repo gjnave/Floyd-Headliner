@@ -90,6 +90,17 @@ body, .gradio-container {
 }
 .ggf-hero h1 { color: var(--ggf-gold); margin: 7px 0; font-size: clamp(1.8rem, 3vw, 2.6rem); }
 .ggf-hero p { color: #dbeafe; margin: 0 0 8px; }
+.ggf-profile {
+    display: inline-block;
+    margin: 3px 0 12px;
+    padding: 5px 10px;
+    border: 1px solid var(--ggf-gold);
+    border-radius: 999px;
+    background: #342b16;
+    color: #ffe4a3;
+    font-size: .84rem;
+    font-weight: 800;
+}
 .ggf-hero a, .ggf-footer a { color: #8fc2ff; font-weight: 700; }
 .ggf-hero .ggf-links { display: flex; gap: 10px 18px; flex-wrap: wrap; }
 .block.ggf-guide, .block.warning {
@@ -163,6 +174,32 @@ body, .gradio-container {
 """
 APP_JS = """
 () => {
+    const imageInputIds = ['ggf-body-reference', 'ggf-head-reference', 'ggf-inpaint-source'];
+    const imageInputSelector = imageInputIds.map(id => `#${id}`).join(', ');
+    let pasteTargetId = null;
+    document.addEventListener('pointerdown', (event) => {
+        pasteTargetId = event.target.closest?.(imageInputSelector)?.id || null;
+    }, true);
+    document.addEventListener('paste', (event) => {
+        if (event.target.closest?.('textarea, input:not([type="file"]), [contenteditable="true"]')) return;
+        const targetId = event.target.closest?.(imageInputSelector)?.id || pasteTargetId;
+        const target = targetId && document.getElementById(targetId);
+        if (!target || target.getClientRects().length === 0) return;
+        const item = Array.from(event.clipboardData?.items || [])
+            .find(item => item.kind === 'file' && item.type.startsWith('image/'));
+        const image = item?.getAsFile();
+        const input = target.querySelector('input[type="file"]');
+        if (!image || !input) return;
+        const subtype = image.type.split('/')[1]?.split('+')[0] || 'png';
+        const extension = subtype === 'jpeg' ? 'jpg' : subtype;
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([image], image.name || `pasted-image.${extension}`,
+                                    { type: image.type || 'image/png' }));
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    }, true);
     // Gradio's occupied image surface can consume a drop as a clear action.
     // Route the dropped file through its existing upload input instead.
     document.addEventListener('dragover', (event) => {
@@ -394,6 +431,14 @@ def model_profile() -> str:
     if value not in {"standard", "low-vram", "low-vram-12gb"}:
         raise RuntimeError(f"Invalid model profile {value!r}.")
     return value
+
+
+def running_profile_label() -> str:
+    return {
+        "standard": "Standard · 24 GB",
+        "low-vram": "Low VRAM · 16 GB target",
+        "low-vram-12gb": "Experimental · 12 GB target",
+    }[model_profile()]
 
 
 def selected_turbo_lora() -> Path:
@@ -805,6 +850,7 @@ def build_likeness_ui(gr):
             type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
             brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
             label="1 — BODY REFERENCE (required): pose, clothes, scene",
+            elem_id="ggf-body-reference",
         )
         head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity",
                         elem_id="ggf-head-reference")
@@ -817,9 +863,9 @@ def build_likeness_ui(gr):
         placeholder="For example: remove the hat; keep the head reference's hair.",
         info="Added to the end of the likeness instruction in Advanced settings.",
     )
-    generate = gr.Button("Transfer likeness", variant="primary", elem_id="ggf-swap-button")
     turbo_generate = gr.Button("Turbo preview · half-size · Ctrl+Enter", variant="secondary",
-                               elem_id="ggf-swap-turbo", visible=model_profile() == "standard")
+                               elem_id="ggf-swap-turbo")
+    generate = gr.Button("Transfer likeness", variant="primary", elem_id="ggf-swap-button")
     output = gr.ImageSlider(
         type="pil", format="png", interactive=False,
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
@@ -919,6 +965,7 @@ def build_ui():
                 '<div class="ggf-kicker">GET GOING FAST · LOCAL AI</div>'
                 '<h1>Floyd Headliner</h1>'
                 '<p>Likeness Transfer &amp; Inpaint · Edit with a prompt.</p>'
+                f'<div class="ggf-profile" role="status">Running mode: {running_profile_label()}</div>'
                 '<nav class="ggf-links" aria-label="Get Going Fast links">'
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">GetGoingFast.pro ↗</a>'
                 '<a href="https://www.youtube.com/@theaihobbyguy" target="_blank" rel="noopener noreferrer">TheAIHobbyGuy on YouTube ↗</a>'
@@ -941,13 +988,25 @@ def build_ui():
             send_to_inpaint.click(open_inpaint, inputs=[likeness_result],
                                   outputs=[inpaint_input, tabs, *inpaint_reset_outputs], api_name=False)
 
-            def open_likeness(result):
-                editor, mask_enabled = result_as_body_input(result)
-                return editor, mask_enabled, gr.update(selected="likeness")
+            def select_likeness(result):
+                if result is None:
+                    raise ValueError("Generate an inpaint result first.")
+                return gr.update(selected="likeness")
 
-            send_to_likeness.click(fn=lambda: None, outputs=[body_input], queue=False, api_name=False).then(
-                open_likeness, inputs=[inpaint_result], outputs=[body_input, body_mask, tabs],
-                api_name=False,
+            def clear_likeness_input():
+                return None
+
+            def open_likeness(result):
+                return result_as_body_input(result)
+
+            send_to_likeness.click(
+                select_likeness, inputs=[inpaint_result], outputs=[tabs],
+                queue=False, api_name=False,
+            ).success(
+                clear_likeness_input, outputs=[body_input], queue=False, api_name=False,
+            ).success(
+                open_likeness, inputs=[inpaint_result], outputs=[body_input, body_mask],
+                queue=False, api_name=False,
             )
             gr.HTML(
                 '<footer class="ggf-footer">Runs on your computer by default. Interface packaged by '
