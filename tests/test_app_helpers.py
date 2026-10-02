@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import os
 from pathlib import Path
 import unittest
@@ -137,6 +138,46 @@ class AppHelperTests(unittest.TestCase):
             full = APP.calculate_working_size(image, .5)
             turbo = APP.calculate_working_size(image, APP.turbo_megapixels(.5))
         self.assertLess(turbo[0] * turbo[1], full[0] * full[1])
+
+    def test_update_check_compares_release_markers_without_installing(self):
+        self.assertEqual(APP.parse_release_version("2026.10.02.1"), (2026, 10, 2, 1))
+        with self.assertRaises(ValueError):
+            APP.parse_release_version("<script>bad</script>")
+        with patch.object(APP, "VERSION_FILE", SimpleNamespace(read_text=lambda **_: "2026.10.02.1")):
+            with patch.object(APP.urllib.request, "urlopen", return_value=io.BytesIO(b"2026.10.02.1\n")):
+                message, available = APP.check_for_updates()
+            self.assertFalse(available)
+            self.assertIn("Up to date", message)
+            with patch.object(APP.urllib.request, "urlopen", return_value=io.BytesIO(b"2026.10.03.1\n")):
+                message, available = APP.check_for_updates()
+            self.assertTrue(available)
+            self.assertIn("3-UPDATE-Floyd-Headliner.bat", message)
+            with patch.object(APP.urllib.request, "urlopen", side_effect=TimeoutError):
+                message, available = APP.check_for_updates()
+            self.assertFalse(available)
+            self.assertIn("works offline", message)
+
+    def test_update_controls_logo_and_output_targets_are_in_ui(self):
+        import sys
+        import gradio as gr
+
+        with patch.dict(sys.modules, {APP.__name__: APP}):
+            ui = APP.build_ui()
+        components = {component["props"].get("elem_id"): component["props"]
+                      for component in ui.config["components"]}
+        self.assertFalse(components["ggf-update-button"]["interactive"])
+        self.assertIn("ggf-check-updates", components)
+        self.assertIn("ggf-likeness-output", components)
+        self.assertIn("ggf-inpaint-output", components)
+        self.assertIn("data:image/png;base64,", APP.hero_logo_html())
+        self.assertIn("Your Time Is Limited.", str(ui.config["components"]))
+        check = next(event for event in ui.fns.values() if event.name == "check_updates_ui")
+        with patch.object(APP, "check_for_updates", return_value=("Update available", True)), \
+                patch.object(gr, "Info") as info:
+            status, update = check.fn()
+        self.assertEqual(status, "Update available")
+        self.assertTrue(update["interactive"])
+        info.assert_called_once()
 
     def test_turbo_preview_quarters_working_pixel_budget_without_changing_steps(self):
         import gradio as gr
@@ -418,13 +459,15 @@ class AppHelperTests(unittest.TestCase):
         self.assertIn("unpainted pixels unchanged", status)
 
     def test_landscape_size_preserves_ratio_and_rounds_to_32(self):
-        width, height = APP.calculate_working_size(Image.new("RGB", (1600, 900)), 1.0)
+        with patch.dict(os.environ, {"FLOYD_HEADLINER_PROFILE": "standard"}):
+            width, height = APP.calculate_working_size(Image.new("RGB", (1600, 900)), 1.0)
         self.assertEqual(width % 32, 0)
         self.assertEqual(height % 32, 0)
         self.assertAlmostEqual(width / height, 16 / 9, delta=0.08)
 
     def test_portrait_size_preserves_ratio_and_rounds_to_32(self):
-        width, height = APP.calculate_working_size(Image.new("RGB", (900, 1600)), 2.0)
+        with patch.dict(os.environ, {"FLOYD_HEADLINER_PROFILE": "standard"}):
+            width, height = APP.calculate_working_size(Image.new("RGB", (900, 1600)), 2.0)
         self.assertEqual(width % 32, 0)
         self.assertEqual(height % 32, 0)
         self.assertAlmostEqual(width / height, 9 / 16, delta=0.04)

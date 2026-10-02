@@ -133,6 +133,7 @@ def build_inpaint_ui(gr, runtime):
             type="pil", format="png", interactive=False,
             label="OUTPUT — drag to compare with the input",
             buttons=["fullscreen"], height=560, scale=1, min_width=440,
+            elem_id="ggf-inpaint-output",
         )
     turbo_generate = gr.Button(
         "Turbo preview · half-size · Ctrl+Enter", variant="secondary", elem_id="ggf-inpaint-turbo",

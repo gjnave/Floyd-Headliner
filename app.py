@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import gc
 import json
 import os
 import random
+import re
 import socket
 import subprocess
 import sys
@@ -34,6 +36,8 @@ BFS_LORA = LORA_DIR / "bfs_head_v1.1_alternative_qwen_2.1.safetensors"
 TURBO_LORA = LORA_DIR / "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
 LOW_TURBO_LORA = LORA_DIR / "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r128.safetensors"
 PROFILE_FILE = MODELS_DIR / "install-profile.txt"
+VERSION_FILE = APP_DIR / "VERSION"
+UPDATE_VERSION_URL = "https://codeberg.org/Cognibuild/Floyd-Headliner/raw/branch/main/VERSION"
 
 DEFAULT_PROMPT = (
     "head_swap: start with <image1> as the base image, keeping its lighting, "
@@ -81,6 +85,10 @@ body, .gradio-container {
     border-radius: 18px;
     padding: 25px 28px;
     margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(220px, .8fr) 150px;
+    align-items: center;
+    gap: 20px;
 }
 .ggf-hero .ggf-kicker {
     color: var(--ggf-gold);
@@ -103,6 +111,25 @@ body, .gradio-container {
 }
 .ggf-hero a, .ggf-footer a { color: #8fc2ff; font-weight: 700; }
 .ggf-hero .ggf-links { display: flex; gap: 10px 18px; flex-wrap: wrap; }
+.ggf-hero-slogan {
+    color: #f4f7fc;
+    font-family: "Segoe UI Variable Display", "Segoe UI", Arial, sans-serif;
+    font-size: clamp(1.3rem, 2.2vw, 1.9rem);
+    font-weight: 750;
+    letter-spacing: -.035em;
+    line-height: 1.18;
+    text-align: center;
+}
+.ggf-hero-slogan strong { color: var(--ggf-gold); font-weight: 800; }
+.ggf-hero-logo { display: block; width: 150px; height: 150px; object-fit: cover; }
+.ggf-update-row { align-items: center; }
+.ggf-update-status { color: var(--ggf-muted); }
+#ggf-check-updates { background: #172842 !important; color: var(--ggf-ink) !important; border: 1px solid #45607f !important; }
+#ggf-update-button[disabled] { background: #172842 !important; color: #8fa2bd !important; border: 1px solid #304763 !important; }
+#ggf-update-button:not([disabled]) { background: var(--ggf-gold) !important; color: #111827 !important; font-weight: 800 !important; animation: ggf-update-glow 1.7s ease-in-out infinite alternate; }
+@keyframes ggf-update-glow { from { box-shadow: 0 0 5px rgba(245,185,66,.45); } to { box-shadow: 0 0 20px rgba(245,185,66,1); } }
+.ggf-image-lightbox { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 18px; background: rgba(2, 7, 17, .94); cursor: zoom-out; }
+.ggf-image-lightbox img { display: block; max-width: 96vw; max-height: 96vh; object-fit: contain; box-shadow: 0 18px 70px rgba(0, 0, 0, .7); cursor: zoom-out; }
 .block.ggf-guide, .block.warning {
     background: var(--ggf-panel);
     border: 1px solid var(--ggf-line);
@@ -170,10 +197,48 @@ body, .gradio-container {
 .tab-nav button { color: var(--ggf-ink) !important; }
 .tab-nav button.selected { color: var(--ggf-gold) !important; }
 .ggf-footer { color: var(--ggf-muted); text-align: center; margin-top: 20px; font-size: .88rem; }
-@media (max-width: 680px) { .app-shell { padding: 10px 6px 24px; } .ggf-hero { padding: 18px; } }
+@media (max-width: 900px) { .ggf-hero { grid-template-columns: minmax(0, 1fr) 110px; } .ggf-hero-slogan { grid-column: 1 / -1; grid-row: 2; } .ggf-hero-logo { width: 110px; height: 110px; } }
+@media (max-width: 680px) { .app-shell { padding: 10px 6px 24px; } .ggf-hero { padding: 18px; gap: 12px; } .ggf-hero-logo { width: 80px; height: 80px; } }
 """
 APP_JS = """
 () => {
+    const outputSelector = '#ggf-likeness-output, #ggf-inpaint-output';
+    let outputPress = null;
+    let lightbox = null;
+    const closeLightbox = () => {
+        lightbox?.remove();
+        lightbox = null;
+    };
+    document.addEventListener('pointerdown', (event) => {
+        const root = event.target.closest?.(outputSelector);
+        outputPress = event.button === 0 && root && event.target.closest?.('.image-container') &&
+            !event.target.closest?.('button, [data-testid="slider"]')
+            ? { root, x: event.clientX, y: event.clientY } : null;
+    }, true);
+    document.addEventListener('pointerup', (event) => {
+        const press = outputPress;
+        outputPress = null;
+        if (!press || lightbox || event.button !== 0 ||
+            event.target.closest?.(outputSelector) !== press.root ||
+            Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) return;
+        const images = press.root.querySelectorAll('img[data-testid="imageslider-image"]');
+        const result = images[images.length - 1];
+        if (!result?.src) return;
+        lightbox = document.createElement('div');
+        lightbox.className = 'ggf-image-lightbox';
+        lightbox.setAttribute('role', 'dialog');
+        lightbox.setAttribute('aria-label', 'Generated image enlarged; click to close');
+        const enlarged = document.createElement('img');
+        enlarged.src = result.currentSrc || result.src;
+        enlarged.alt = 'Generated image';
+        enlarged.draggable = false;
+        lightbox.append(enlarged);
+        lightbox.addEventListener('click', closeLightbox);
+        document.body.append(lightbox);
+    }, true);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeLightbox();
+    }, true);
     const imageInputIds = ['ggf-body-reference', 'ggf-head-reference', 'ggf-inpaint-source'];
     const imageInputSelector = imageInputIds.map(id => `#${id}`).join(', ');
     let pasteTargetId = null;
@@ -439,6 +504,45 @@ def running_profile_label() -> str:
         "low-vram": "Low VRAM · 16 GB target",
         "low-vram-12gb": "Experimental · 12 GB target",
     }[model_profile()]
+
+
+def hero_logo_html() -> str:
+    logo = APP_DIR / "assets" / "ggf-brain-logo.png"
+    if not logo.is_file():
+        return ""
+    encoded = base64.b64encode(logo.read_bytes()).decode("ascii")
+    return f'<img class="ggf-hero-logo" src="data:image/png;base64,{encoded}" alt="Get Going Fast logo">'
+
+
+def parse_release_version(value: str) -> tuple[int, int, int, int]:
+    value = value.strip()
+    if not re.fullmatch(r"\d{4}\.\d{1,2}\.\d{1,2}\.\d+", value):
+        raise ValueError("Invalid Floyd Headliner version marker.")
+    return tuple(int(part) for part in value.split("."))
+
+
+def check_for_updates() -> tuple[str, bool]:
+    """Read only: compare the installed marker with Codeberg's release marker."""
+    request = urllib.request.Request(
+        UPDATE_VERSION_URL,
+        headers={"User-Agent": "Floyd-Headliner-Update-Check", "Cache-Control": "no-cache"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            latest = response.read(64).decode("utf-8").strip()
+        latest_number = parse_release_version(latest)
+    except (OSError, TimeoutError, UnicodeError, ValueError) as exc:
+        return f"Could not check Codeberg for updates ({type(exc).__name__}). The app still works offline.", False
+    try:
+        installed = VERSION_FILE.read_text(encoding="utf-8").strip()
+        installed_number = parse_release_version(installed)
+    except (OSError, ValueError):
+        return (f"Update available ({latest}). This installation has no version marker; "
+                "close the app and run 3-UPDATE-Floyd-Headliner.bat."), True
+    if latest_number > installed_number:
+        return (f"Update available: {installed} → {latest}. "
+                "Close the app and run 3-UPDATE-Floyd-Headliner.bat."), True
+    return f"Up to date (installed {installed}).", False
 
 
 def selected_turbo_lora() -> Path:
@@ -869,6 +973,7 @@ def build_likeness_ui(gr):
     output = gr.ImageSlider(
         type="pil", format="png", interactive=False,
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
+        elem_id="ggf-likeness-output",
     )
     last_result = gr.State(None)
     with gr.Row():
@@ -962,6 +1067,7 @@ def build_ui():
         with gr.Column(elem_classes="app-shell"):
             gr.HTML(
                 '<header class="ggf-hero">'
+                '<div class="ggf-hero-copy">'
                 '<div class="ggf-kicker">GET GOING FAST · LOCAL AI</div>'
                 '<h1>Floyd Headliner</h1>'
                 '<p>Likeness Transfer &amp; Inpaint · Edit with a prompt.</p>'
@@ -969,8 +1075,31 @@ def build_ui():
                 '<nav class="ggf-links" aria-label="Get Going Fast links">'
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">GetGoingFast.pro ↗</a>'
                 '<a href="https://www.youtube.com/@theaihobbyguy" target="_blank" rel="noopener noreferrer">TheAIHobbyGuy on YouTube ↗</a>'
-                '</nav></header>'
+                '</nav></div>'
+                '<div class="ggf-hero-slogan">Your Time Is Limited.<br><strong>Get Going Fast.</strong></div>'
+                f'{hero_logo_html()}'
+                '</header>'
             )
+            with gr.Row(elem_classes="ggf-update-row"):
+                check_updates = gr.Button("Check for updates", variant="secondary", size="sm", scale=0,
+                                          min_width=180, elem_id="ggf-check-updates")
+                update_button = gr.Button("Update", interactive=False, size="sm", scale=0,
+                                          min_width=160, elem_id="ggf-update-button")
+            update_status = gr.Markdown("Updates not checked yet.", elem_classes="ggf-update-status")
+
+            def check_updates_ui():
+                message, available = check_for_updates()
+                if available:
+                    gr.Info("Update available. Close Floyd Headliner, then run 3-UPDATE-Floyd-Headliner.bat.")
+                return message, gr.update(interactive=available)
+
+            def show_update_instructions():
+                message = "Close Floyd Headliner, run 3-UPDATE-Floyd-Headliner.bat, then start the app again."
+                gr.Info(message)
+                return message
+
+            check_updates.click(check_updates_ui, outputs=[update_status, update_button], queue=False, api_name=False)
+            update_button.click(show_update_instructions, outputs=[update_status], queue=False, api_name=False)
             gr.Markdown("Use only images you have the right and consent to edit. Do not use the app for impersonation or deception.",
                         elem_classes="warning")
             with gr.Tabs() as tabs:
