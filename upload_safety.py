@@ -13,6 +13,41 @@ import shutil
 from uuid import uuid4
 
 import anyio
+from fastapi import HTTPException
+from PIL import Image
+
+
+MAX_UPLOAD_PIXELS = 32_000_000
+MAX_UPLOAD_SIDE = 8192
+IMAGE_SIZE_MESSAGE = (
+    "Image is too large. Resize it to at most 32 megapixels and "
+    "8,192 pixels on either side, then upload it again."
+)
+
+
+def validate_image_path(path):
+    """Read only the image header; never allocate its full pixel buffer."""
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+    except Image.DecompressionBombError as error:
+        raise ValueError(IMAGE_SIZE_MESSAGE) from error
+    if width * height > MAX_UPLOAD_PIXELS or max(width, height) > MAX_UPLOAD_SIDE:
+        raise ValueError(IMAGE_SIZE_MESSAGE)
+
+
+def validate_component_images(payload):
+    """Check cached Gradio files before a component decodes their pixels."""
+    def field(value, name):
+        return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+    files = ([field(payload, "path")] if field(payload, "path") else
+             [field(payload, "background"), *(field(payload, "layers") or []),
+              field(payload, "composite")])
+    for item in files:
+        path = item if isinstance(item, str) else field(item, "path") if item is not None else None
+        if path:
+            validate_image_path(path)
 
 
 def install_upload_fix():
@@ -32,6 +67,16 @@ def install_upload_fix():
         else:
             kwargs["force_move"] = False
         outputs, sources, destinations = await original(*args, **kwargs)
+        pending = {str(Path(destination)): Path(source)
+                   for source, destination in zip(sources, destinations, strict=True)}
+        for output in outputs:
+            candidate = pending.get(str(Path(output)), Path(output))
+            try:
+                await anyio.to_thread.run_sync(validate_image_path, candidate)
+            except ValueError as error:
+                raise HTTPException(status_code=413, detail=str(error)) from error
+            except OSError as error:
+                raise HTTPException(status_code=400, detail="The uploaded image could not be read. Upload a valid image.") from error
         replacements = {}
         for source, destination in zip(sources, destinations, strict=True):
             destination = Path(destination)

@@ -66,8 +66,8 @@ class AppHelperTests(unittest.TestCase):
         self.assertIs(generate.outputs[4], open_inpaint.inputs[0])
         self.assertIsInstance(open_inpaint.inputs[0], gr.State)
         result = Image.new("RGB", (20, 20), "green")
-        canvas_value, tab_update = open_inpaint.fn(result)
-        self.assertTrue(canvas_value["load_image"].startswith("data:image/png;base64,"))
+        input_value, tab_update = open_inpaint.fn(result)
+        self.assertIs(input_value, result)
         self.assertEqual(tab_update["selected"], "inpaint")
 
     def test_protect_hides_reference_and_restores_original_pixels(self):
@@ -89,6 +89,7 @@ class AppHelperTests(unittest.TestCase):
         class FakePipe:
             fast_resident = False
             prompt_cache_hit = False
+            def enable_lora(self): pass
             def set_adapters(self, *args, **kwargs): pass
             def __call__(self, **kwargs):
                 self.request = kwargs
@@ -138,6 +139,24 @@ class AppHelperTests(unittest.TestCase):
             editor.preprocess(object())
         self.assertIn("re-upload", str(error.exception))
         self.assertEqual(editor.preprocess.__closure__[0].cell_contents.call_count, 5)
+
+    def test_oversized_head_is_rejected_before_gradio_decodes_it(self):
+        import gradio as gr
+        head = SimpleNamespace(preprocess=Mock())
+        APP.protect_head_preprocessing(head)
+        with patch("upload_safety.validate_component_images", side_effect=ValueError("Image is too large")):
+            with self.assertRaisesRegex(gr.Error, "Image is too large"):
+                head.preprocess(object())
+        head.preprocess.__closure__[0].cell_contents.assert_not_called()
+
+    def test_oversized_body_is_rejected_before_gradio_decodes_it(self):
+        import gradio as gr
+        body = SimpleNamespace(preprocess=Mock())
+        APP.protect_editor_preprocessing(body)
+        with patch("upload_safety.validate_component_images", side_effect=ValueError("Image is too large")):
+            with self.assertRaisesRegex(gr.Error, "Image is too large"):
+                body.preprocess(object())
+        body.preprocess.__closure__[0].cell_contents.assert_not_called()
 
     def check_startup(self, profiles, current, answer=None, requested=None):
         profile_file = Mock()
@@ -273,6 +292,8 @@ class AppHelperTests(unittest.TestCase):
         class FakePipe:
             fast_resident = False
             prompt_cache_hit = False
+            def enable_lora(self):
+                self.lora_enabled = True
             def set_adapters(self, *args, **kwargs): pass
             def __call__(self, **kwargs):
                 self.request = kwargs
@@ -287,6 +308,7 @@ class AppHelperTests(unittest.TestCase):
                 {"background": body, "layers": [layer]}, Image.new("RGB", (32, 32)),
                 APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 2, False, "", True, 0)
         self.assertLess(pipe.request["image"][0].width, body.width)
+        self.assertTrue(pipe.lora_enabled)
         self.assertEqual(result.size, body.size)
         self.assertEqual(result.getpixel((50, 50)), (255, 0, 0))
         self.assertEqual(result.getpixel((250, 50)), (0, 0, 255))
@@ -328,6 +350,9 @@ class AppHelperTests(unittest.TestCase):
         class FakePipe:
             fast_resident = False
             prompt_cache_hit = False
+
+            def enable_lora(self):
+                pass
 
             def set_adapters(self, *args, **kwargs):
                 pass

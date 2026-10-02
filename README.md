@@ -90,10 +90,6 @@ benchmark**; CUDA/desktop memory outside PyTorch is additional. Real-card speed,
 available RAM, image quality, and reliability still need user testing. Close other
 GPU apps before testing. Standard mode remains unchanged.
 
-The three-reference Inpaint pipeline also passed the same cap at 704 × 704:
-10.46 s first / 7.54 s cached, with 10.22 GiB peak reserved. These synthetic
-smoke tests check execution and memory, not photographic likeness quality.
-
 ![Floyd Headliner — Likeness Transfer](assets/fh2.png)
 
 
@@ -102,29 +98,14 @@ middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 **Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
-On the **Inpaint** tab, **Change background in painted area** is off by default.
-The edit prompt preserves the existing setting; removing an object can reconstruct
-only the small area it previously covered. To edit scenery or replace a background,
-turn the checkbox on and paint the area to change. Pixels outside the painted edit
-area are always restored from the original. For clothing changes, describe the
-replacement garment in the prompt.
-
-The Inpaint result appears beside the drawing canvas. A new brush stroke clears
-the edit prompt so an old instruction cannot carry into the next mask; check
-**Keep prompt** beside the text box to reuse it. A blank prompt identifies the
-intended edit and uses that instruction in the same generation click. Brush
-overlay colors for Add and Remove are visual markers, not requested output
-colors. The **Color** tool still uses the color you select.
-
-The brush toolbar always shows the active tool. Add uses green selection marks;
-Remove uses pink selection marks. Choose **Color** explicitly to recolor, then
-choose its desired color. The color picker no longer switches tools. For a
-edit with a blank prompt, the vision encoder supplies a concrete instruction in
-the same Generate click. The instruction is shown below the result. Remove
-then uses the original image and a black-and-white selection instead of a pink
-guide image. It may still misidentify an object; a specific written instruction
-overrides the automatic guess. This Qwen editing path does not use MagicQuill's
-BrushNet inpainting model.
+On the **Inpaint** tab, upload one image, type an instruction such as “remove the
+hat,” and click **Generate edit** or press **Ctrl+Enter**. The result appears
+beside the input with a before/after slider. **Use result for the next edit**
+loads it as the new input. This is prompt-based full-image editing: the model may
+also change details outside the requested object. No drawing or mask is used.
+Inpaint runs the base Qwen Image 2.1 model with both LoRAs disabled. Its default
+is 40 steps because the six-step setting depends on the Viggle Turbo LoRA.
+The BFS and Viggle Turbo LoRAs remain available in Likeness Transfer.
 
 For likeness transfer, **Protect painted area (experimental)** hides painted heads
 from the input seen by the model, then restores those regions from the original.

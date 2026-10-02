@@ -231,7 +231,12 @@ def protect_editor_preprocessing(editor):
     def preprocess(payload):
         for attempt in range(5):
             try:
+                from upload_safety import validate_component_images
+                validate_component_images(payload)
                 return original_preprocess(payload)
+            except ValueError as error:
+                import gradio as gr
+                raise gr.Error(str(error)) from error
             except (OSError, SyntaxError) as error:
                 if attempt == 4:
                     import gradio as gr
@@ -245,6 +250,24 @@ def protect_editor_preprocessing(editor):
 
     editor.preprocess = preprocess
     return editor
+
+
+def protect_head_preprocessing(component):
+    """Reject an oversized cached head image before Gradio decodes it."""
+    original_preprocess = component.preprocess
+
+    def preprocess(payload):
+        from upload_safety import validate_component_images
+        import gradio as gr
+
+        try:
+            validate_component_images(payload)
+            return original_preprocess(payload)
+        except (ValueError, Image.DecompressionBombError) as error:
+            raise gr.Error(str(error)) from error
+
+    component.preprocess = preprocess
+    return component
 
 
 def prepare_selection(body_input, selected_only=False):
@@ -652,6 +675,7 @@ def run_swap(
         started = time.perf_counter()
         pipe = _load_pipeline()
         configure_speed_mode(pipe, keep_on_gpu, width, height)
+        pipe.enable_lora()
         pipe.set_adapters(
             ["bfs", "turbo"],
             adapter_weights=[float(bfs_strength), float(turbo_strength)],
@@ -717,6 +741,7 @@ def build_likeness_ui(gr):
         )
         head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity")
     protect_editor_preprocessing(body)
+    protect_head_preprocessing(head)
     extra_prompt = gr.Textbox(
         label="Extra prompt", value="", lines=2,
         placeholder="For example: remove the hat; keep the head reference's hair.",
@@ -792,7 +817,7 @@ def build_ui():
     import gradio as gr
     from upload_safety import install_upload_fix
     install_upload_fix()
-    from inpaint import build_inpaint_ui, image_data_url
+    from inpaint import build_inpaint_ui
 
     with gr.Blocks(title="Floyd Headliner · Get Going Fast") as demo:
         with gr.Column(elem_classes="app-shell"):
@@ -800,7 +825,7 @@ def build_ui():
                 '<header class="ggf-hero">'
                 '<div class="ggf-kicker">GET GOING FAST · LOCAL AI</div>'
                 '<h1>Floyd Headliner</h1>'
-                '<p>Likeness Transfer &amp; Inpaint · Draw your next idea.</p>'
+                '<p>Likeness Transfer &amp; Inpaint · Edit with a prompt.</p>'
                 '<nav class="ggf-links" aria-label="Get Going Fast links">'
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">GetGoingFast.pro ↗</a>'
                 '<a href="https://www.youtube.com/@theaihobbyguy" target="_blank" rel="noopener noreferrer">TheAIHobbyGuy on YouTube ↗</a>'
@@ -812,14 +837,14 @@ def build_ui():
                 with gr.Tab("Likeness Transfer", id="likeness"):
                     likeness_result, send_to_inpaint = build_likeness_ui(gr)
                 with gr.Tab("Inpaint", id="inpaint"):
-                    inpaint_canvas = build_inpaint_ui(gr, sys.modules[__name__])
+                    inpaint_input = build_inpaint_ui(gr, sys.modules[__name__])
 
             def open_inpaint(result):
                 if result is None:
                     raise ValueError("Generate a likeness result first.")
-                return {"load_image": image_data_url(result)}, gr.update(selected="inpaint")
+                return result, gr.update(selected="inpaint")
 
-            send_to_inpaint.click(open_inpaint, inputs=[likeness_result], outputs=[inpaint_canvas, tabs], api_name=False)
+            send_to_inpaint.click(open_inpaint, inputs=[likeness_result], outputs=[inpaint_input, tabs], api_name=False)
             gr.HTML(
                 '<footer class="ggf-footer">Runs on your computer by default. Interface packaged by '
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">Get Going Fast</a>. '
