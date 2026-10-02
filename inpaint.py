@@ -134,12 +134,12 @@ def build_inpaint_ui(gr, runtime):
             label="OUTPUT — drag to compare with the input",
             buttons=["fullscreen"], height=560, scale=1, min_width=440,
         )
-    generate = gr.Button(
-        "Generate edit", variant="primary", elem_id="ggf-inpaint-button",
-    )
     turbo_generate = gr.Button(
         "Turbo preview · half-size · Ctrl+Enter", variant="secondary", elem_id="ggf-inpaint-turbo",
         visible=runtime.model_profile() == "standard",
+    )
+    generate = gr.Button(
+        "Generate edit (full size)", variant="primary", elem_id="ggf-inpaint-button",
     )
     with gr.Accordion("Edit settings", open=False):
         with gr.Row():
@@ -192,22 +192,26 @@ def build_inpaint_ui(gr, runtime):
         concurrency_id="gpu", api_name="turbo_inpaint", show_progress_on=[comparison],
     )
 
+    def clear_result():
+        return (None, None, gr.update(value=None, visible=False),
+                gr.update(interactive=False), gr.update(interactive=False), "")
+
+    reset_outputs = [comparison, result_state, download, accept, send_to_likeness, status]
+
     def accept_result(result):
         if result is None:
             raise ValueError("Generate an edit first.")
-        return result, gr.update(interactive=False)
+        return result, *clear_result()
 
-    accept.click(accept_result, inputs=[result_state], outputs=[source, accept], api_name=False)
-    source.change(
-        lambda: (None, None, gr.update(value=None, visible=False),
-                 gr.update(interactive=False), gr.update(interactive=False), ""),
-        outputs=[comparison, result_state, download, accept, send_to_likeness, status],
-        show_progress="hidden", queue=False, api_name=False,
-    )
+    accept.click(accept_result, inputs=[result_state], outputs=[source, *reset_outputs], api_name=False)
+    source.upload(clear_result, outputs=reset_outputs,
+                  show_progress="hidden", queue=False, api_name=False)
+    source.clear(clear_result, outputs=reset_outputs,
+                 show_progress="hidden", queue=False, api_name=False)
     release.click(runtime.release_models, outputs=[status], concurrency_id="gpu")
     gr.Markdown(
         "Uses the app-local Qwen core on the standard profile; low-VRAM profiles "
         "keep their existing offload path. Both LoRAs are disabled for this tab.",
         elem_classes="ggf-guide",
     )
-    return source, result_state, send_to_likeness
+    return source, result_state, send_to_likeness, reset_outputs, clear_result

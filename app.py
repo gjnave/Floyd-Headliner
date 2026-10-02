@@ -930,14 +930,16 @@ def build_ui():
                 with gr.Tab("Likeness Transfer", id="likeness"):
                     body_input, body_mask, likeness_result, send_to_inpaint = build_likeness_ui(gr)
                 with gr.Tab("Inpaint", id="inpaint"):
-                    inpaint_input, inpaint_result, send_to_likeness = build_inpaint_ui(gr, sys.modules[__name__])
+                    (inpaint_input, inpaint_result, send_to_likeness,
+                     inpaint_reset_outputs, clear_inpaint_result) = build_inpaint_ui(gr, sys.modules[__name__])
 
             def open_inpaint(result):
                 if result is None:
                     raise ValueError("Generate a likeness result first.")
-                return result, gr.update(selected="inpaint")
+                return result, gr.update(selected="inpaint"), *clear_inpaint_result()
 
-            send_to_inpaint.click(open_inpaint, inputs=[likeness_result], outputs=[inpaint_input, tabs], api_name=False)
+            send_to_inpaint.click(open_inpaint, inputs=[likeness_result],
+                                  outputs=[inpaint_input, tabs, *inpaint_reset_outputs], api_name=False)
 
             def open_likeness(result):
                 editor, mask_enabled = result_as_body_input(result)

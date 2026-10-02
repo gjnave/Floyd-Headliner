@@ -111,9 +111,11 @@ class AppHelperTests(unittest.TestCase):
         self.assertIs(generate.outputs[4], open_inpaint.inputs[0])
         self.assertIsInstance(open_inpaint.inputs[0], gr.State)
         result = Image.new("RGB", (20, 20), "green")
-        input_value, tab_update = open_inpaint.fn(result)
+        input_value, tab_update, *reset = open_inpaint.fn(result)
         self.assertIs(input_value, result)
         self.assertEqual(tab_update["selected"], "inpaint")
+        self.assertIsNone(reset[0])
+        self.assertIsNone(reset[1])
 
     def test_protect_hides_reference_and_restores_original_pixels(self):
         original = Image.new("RGB", (100, 80), "blue")

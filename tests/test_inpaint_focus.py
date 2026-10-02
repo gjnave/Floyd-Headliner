@@ -67,6 +67,8 @@ class InpaintFocusTests(unittest.TestCase):
                           "OUTPUT" in (component["props"].get("label") or ""))
         generate = next(component for component in components
                         if component["props"].get("elem_id") == "ggf-inpaint-button")
+        turbo = next(component for component in components
+                     if component["props"].get("elem_id") == "ggf-inpaint-turbo")
         self.assertEqual(source["type"], "image")
 
         def find_direct_parent(target, node):
@@ -83,7 +85,15 @@ class InpaintFocusTests(unittest.TestCase):
                          find_direct_parent(comparison["id"], config["layout"])["id"])
         container = find_direct_parent(image_row["id"], config["layout"])
         child_ids = [child["id"] for child in container["children"]]
-        self.assertEqual(child_ids[child_ids.index(image_row["id"]) + 1], generate["id"])
+        self.assertEqual(child_ids[child_ids.index(image_row["id"]) + 1], turbo["id"])
+        self.assertEqual(child_ids[child_ids.index(turbo["id"]) + 1], generate["id"])
+        self.assertEqual(generate["props"]["value"], "Generate edit (full size)")
+
+        # Tab selection is not a source edit and must not erase the prior output.
+        source_events = {kind for dependency in config["dependencies"]
+                         for component_id, kind in dependency.get("targets", [])
+                         if component_id == source["id"]}
+        self.assertEqual(source_events, {"upload", "clear"})
 
         inpaint_event = next(event for event in config["dependencies"]
                              if event.get("api_name") == "inpaint")

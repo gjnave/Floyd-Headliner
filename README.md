@@ -111,11 +111,14 @@ painted-area edit, the preview is resampled after compositing, so unpainted
 pixels will not remain byte-identical to the full-resolution input.
 
 On the **Inpaint** tab, upload one image, type an instruction such as “remove the
-hat,” and click **Generate edit** for a full-size result or press **Ctrl+Enter**
+hat,” and click **Generate edit (full size)** for a full-size result or press **Ctrl+Enter**
 for a Turbo preview on the standard profile. The result appears
 beside the input with a before/after slider. **Use result for the next edit**
 loads it as the new input. This is prompt-based full-image editing: the model may
 also change details outside the requested object. No drawing or mask is used.
+Switching to Likeness Transfer and back leaves the Inpaint result in place;
+uploading or clearing the input, or using the result as the next input, clears
+the old comparison.
 Inpaint runs the base Qwen Image 2.1 model with both LoRAs disabled. Its default
 is 40 steps because the six-step setting depends on the Viggle Turbo LoRA.
 After an edit, **Send result to Likeness Transfer** places that result in the
