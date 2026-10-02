@@ -42,7 +42,9 @@ class InpaintFocusTests(unittest.TestCase):
                 return SimpleNamespace(images=[Image.new("RGB", (32, 48), "red")])
 
         pipe = Pipe()
-        with patch.object(app, "_load_pipeline", return_value=pipe), patch("torch.Generator"), \
+        with patch.object(app, "model_profile", return_value="low-vram"), \
+             patch.object(app, "release_core_models"), \
+             patch.object(app, "_load_pipeline", return_value=pipe), patch("torch.Generator"), \
              patch.object(Image.Image, "save"), patch("torch.cuda.empty_cache"):
             result = run_inpaint(app, original, "remove the hat", 42, False, 40, .5, False)
 
@@ -97,6 +99,21 @@ class InpaintFocusTests(unittest.TestCase):
         steps = next(component for component in components
                      if component["props"].get("label") == "Steps (base model)")
         self.assertEqual(steps["props"]["value"], 40)
+
+    def test_turbo_inpaint_halves_working_dimensions_and_saves_native_size(self):
+        import inpaint
+
+        ui = app.build_ui()
+        turbo = next(event for event in ui.fns.values()
+                     if event.name == "generate_turbo_edit")
+        original = Image.new("RGB", (512, 512), "blue")
+        preview = Image.new("RGB", (256, 256), "red")
+        response = ((original.resize(preview.size), preview), "out.png", "done", "42", preview)
+        with patch.object(inpaint, "run_inpaint", return_value=response) as run:
+            values = turbo.fn(original, "remove the hat", 42, False, 40, 1.0, True)
+        self.assertEqual(run.call_args.args[6], .25)
+        self.assertTrue(run.call_args.kwargs["turbo_preview"])
+        self.assertIs(values[3], preview)
 
 
 if __name__ == "__main__":

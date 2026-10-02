@@ -149,7 +149,8 @@ def _cached_input(image: Image.Image, output_dir: Path) -> Path:
 
 
 def run_inpaint(runtime, original: Image.Image, prompt: str, seed: int,
-                steps: int, megapixels: float, keep_on_gpu: bool, progress=None):
+                steps: int, megapixels: float, keep_on_gpu: bool, progress=None,
+                turbo_preview: bool = False):
     """Edit one image with the app-local Qwen core and no LoRA adapters."""
     if not inpaint_available():
         raise RuntimeError(
@@ -173,6 +174,7 @@ def run_inpaint(runtime, original: Image.Image, prompt: str, seed: int,
             "seed": int(seed),
             "steps": int(steps),
             "resolution": resolution,
+            "restore_size": not turbo_preview,
             "output_dir": str(output_dir),
         }, output_dir)
     finally:
@@ -180,23 +182,25 @@ def run_inpaint(runtime, original: Image.Image, prompt: str, seed: int,
             WORKER.stop()
     with Image.open(response["output"]) as saved:
         result = saved.convert("RGB")
+    comparison_input = original.resize(result.size, Image.Resampling.LANCZOS) if turbo_preview else original
     width, height = response["working_size"]
+    size_note = "Turbo preview saved at working size. " if turbo_preview else "Original dimensions retained. "
     status = (
         f"Saved {Path(response['output']).name}  \n"
         f"Seed: {seed} | Time: {time.perf_counter() - started:.1f} s | "
         f"Working canvas: {width} × {height} | App-local Qwen core; LoRAs off | "
         f"Cache: {'reused' if response['conditioning_cache_hit'] else 'encoded'}  \n"
-        "Original dimensions retained. The model may change details outside the requested object."
+        f"{size_note}The model may change details outside the requested object."
     )
     if progress is not None:
         progress(1, desc="Saved")
-    return (original, result), response["output"], status, str(seed), result
+    return (comparison_input, result), response["output"], status, str(seed), result
 
 
 def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
              bfs_strength, turbo_strength, steps, working_megapixels,
              output_upscale, keep_on_gpu, extra_prompt, selected_only,
-             feather, mask_mode):
+             feather, mask_mode, turbo_preview=False):
     if not available():
         raise RuntimeError("Fast likeness transfer needs both the BFS and Viggle LoRA files.")
     if body_image is None or head_image is None:
@@ -244,8 +248,8 @@ def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
         raise ValueError("Seed must be between 0 and 9223372036854775807.")
     used_seed = random.randrange(2**63) if randomize_seed else int(seed)
     megapixels = float(working_megapixels)
-    if not 0.25 <= megapixels <= 2.0:
-        raise ValueError("Working megapixels must be between 0.25 and 2.0.")
+    if not 0.125 <= megapixels <= 2.0:
+        raise ValueError("Working megapixels must be between 0.125 and 2.0.")
     resolution = round((megapixels ** 0.5) * 1024 / 32) * 32
 
     # The two backends use separate large model sets. Avoid holding both.
@@ -269,6 +273,9 @@ def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
     output_path = Path(response["output"])
     if selected_only:
         result = runtime.composite_selection(original, result, mask, crop, feather)
+        if turbo_preview:
+            result = result.resize(runtime.calculate_working_size(original, megapixels),
+                                   Image.Resampling.LANCZOS)
         output_path = output_dir / (
             f"floyd-core-mask-{datetime.now():%Y%m%d-%H%M%S-%f}-seed-{used_seed}.png"
         )
@@ -285,5 +292,7 @@ def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
         f"`{'reused' if response['conditioning_cache_hit'] else 'encoded'}`"
     )
     if selected_only:
-        status += "  \nPainted-area result restored to original dimensions."
+        status += ("  \nPainted area restored before half-size preview resampling."
+                   if turbo_preview else
+                   "  \nPainted-area result restored to original dimensions.")
     return result, str(output_path), status, used_seed

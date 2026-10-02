@@ -101,6 +101,14 @@ middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
 **Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
+On a standard-profile install, **Turbo preview · half-size** runs the same
+generation at about half the selected working width and height, keeping the
+image's aspect ratio. It saves the preview at that smaller size without 2×
+output upscaling. The step count and likeness LoRA settings are unchanged.
+This is a speed/quality preview, not a high-resolution final render. For a
+painted-area edit, the preview is resampled after compositing, so unpainted
+pixels will not remain byte-identical to the full-resolution input.
+
 On the **Inpaint** tab, upload one image, type an instruction such as “remove the
 hat,” and click **Generate edit** or press **Ctrl+Enter**. The result appears
 beside the input with a before/after slider. **Use result for the next edit**
@@ -112,6 +120,10 @@ The BFS and Viggle Turbo LoRAs remain available in Likeness Transfer.
 On a standard-profile installation, Inpaint now uses the same app-local Qwen
 inference core as Fast core likeness transfer. Low-VRAM profiles retain their
 existing Diffusers offload path until the core is validated on those GPUs.
+The Inpaint tab has the same **Turbo preview · half-size** option on the
+standard profile. It saves the smaller native working image instead of
+resizing it back to the uploaded image's dimensions. Use the regular button
+for the full-size result.
 
 ### Optional fast likeness engine
 

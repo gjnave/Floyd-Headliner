@@ -155,6 +155,7 @@ body, .gradio-container {
     overflow-wrap: anywhere;
 }
 #ggf-swap-button, #ggf-inpaint-button { background: var(--ggf-gold) !important; color: #111827 !important; font-weight: 800 !important; }
+#ggf-swap-turbo, #ggf-inpaint-turbo { background: #172842 !important; color: var(--ggf-gold) !important; border: 1px solid var(--ggf-gold) !important; font-weight: 700 !important; }
 .tab-nav button { color: var(--ggf-ink) !important; }
 .tab-nav button.selected { color: var(--ggf-gold) !important; }
 .ggf-footer { color: var(--ggf-muted); text-align: center; margin-top: 20px; font-size: .88rem; }
@@ -183,7 +184,8 @@ def calculate_working_size(image: Image.Image, megapixels: float = 1.0) -> tuple
         raise ValueError("The base image has invalid dimensions.")
     if model_profile() == "low-vram-12gb":
         megapixels = min(float(megapixels), 0.5)
-    target_area = max(0.25, float(megapixels)) * 1_048_576
+    minimum = 0.25 if model_profile() != "standard" else 0.125
+    target_area = max(minimum, float(megapixels)) * 1_048_576
     ratio = width / height
     scaled_width = max(32, round((target_area * ratio) ** 0.5 / 32) * 32)
     scaled_height = max(32, round((target_area / ratio) ** 0.5 / 32) * 32)
@@ -191,6 +193,11 @@ def calculate_working_size(image: Image.Image, megapixels: float = 1.0) -> tuple
         scaled_width = max(32, int((target_area * ratio) ** 0.5 / 32) * 32)
         scaled_height = max(32, int((target_area / ratio) ** 0.5 / 32) * 32)
     return scaled_width, scaled_height
+
+
+def turbo_megapixels(megapixels: float) -> float:
+    """Quarter the pixel budget to halve each working dimension."""
+    return max(0.125, float(megapixels) / 4)
 
 
 def compose_prompt(prompt: str, extra_prompt: str | None = None) -> str:
@@ -335,8 +342,8 @@ def unprotected_side_crop(protected):
     return None
 
 
-def run_swap_ui(*args):
-    result, path, status, used_seed = run_swap(*args)
+def run_swap_ui(*args, turbo_preview: bool = False):
+    result, path, status, used_seed = run_swap(*args, turbo_preview=turbo_preview)
     original, _, _ = prepare_selection(args[0])
     original = original.resize(result.size, Image.Resampling.LANCZOS)
     return (original, result), path, status, str(used_seed)
@@ -640,6 +647,7 @@ def run_swap(
     feather: float = 8,
     mask_mode: str = "Edit painted area",
     backend: str = STANDALONE_LABEL,
+    turbo_preview: bool = False,
 ):
     if backend == FAST_CORE_LABEL:
         from core_runtime import run_swap as run_fast_core
@@ -648,7 +656,7 @@ def run_swap(
             sys.modules[__name__], body_image, head_image, prompt, seed,
             randomize_seed, bfs_strength, turbo_strength, steps,
             working_megapixels, output_upscale, keep_on_gpu, extra_prompt,
-            selected_only, feather, mask_mode,
+            selected_only, feather, mask_mode, turbo_preview,
         )
     if backend != STANDALONE_LABEL:
         raise ValueError("Choose a valid likeness-transfer engine.")
@@ -720,6 +728,8 @@ def run_swap(
 
     if selected_only:
         result = composite_selection(original, result, mask, crop, feather)
+        if turbo_preview:
+            result = result.resize(calculate_working_size(original, working_megapixels), Image.Resampling.LANCZOS)
     elif int(output_upscale) > 1:
         result = result.resize(
             (result.width * int(output_upscale), result.height * int(output_upscale)),
@@ -746,7 +756,9 @@ def run_swap(
                    ("model focused on the unprotected side; " if side_crop else "painted heads hidden from the model; ") +
                    "protected pixels restored from the original.")
     elif selected_only:
-        status += "  \nPainted-area edit: original dimensions retained; unpainted pixels unchanged."
+        status += ("  \nPainted-area edit: mask restored before half-size preview resampling."
+                   if turbo_preview else
+                   "  \nPainted-area edit: original dimensions retained; unpainted pixels unchanged.")
     return result, str(output_path), status, used_seed
 
 
@@ -775,6 +787,8 @@ def build_likeness_ui(gr):
         info="Added to the end of the likeness instruction in Advanced settings.",
     )
     generate = gr.Button("Transfer likeness · Ctrl+Enter", variant="primary", elem_id="ggf-swap-button")
+    turbo_generate = gr.Button("Turbo preview · half-size", variant="secondary",
+                               elem_id="ggf-swap-turbo", visible=model_profile() == "standard")
     output = gr.ImageSlider(
         type="pil", format="png", interactive=False,
         label="BEFORE / AFTER — drag the divider (original left, result right)", buttons=["fullscreen"],
@@ -841,13 +855,21 @@ def build_likeness_ui(gr):
         result = run_swap_ui(*args)
         return (*result, result[0][1], gr.update(interactive=True), gr.update(interactive=True))
 
-    generate.click(
-        fn=generate_transfer,
-        inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
-                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather,
-                mask_mode, backend],
-        outputs=[output, saved_file, status, used_seed, last_result, reuse_result, send_to_inpaint], concurrency_id="gpu",
-    )
+    def generate_turbo_transfer(*args):
+        settings = list(args)
+        settings[8] = turbo_megapixels(settings[8])
+        settings[9] = 1
+        result = run_swap_ui(*settings, turbo_preview=True)
+        return (*result, result[0][1], gr.update(interactive=True), gr.update(interactive=True))
+
+    transfer_inputs = [body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
+                       working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather,
+                       mask_mode, backend]
+    transfer_outputs = [output, saved_file, status, used_seed, last_result, reuse_result, send_to_inpaint]
+    generate.click(fn=generate_transfer, inputs=transfer_inputs, outputs=transfer_outputs,
+                   concurrency_id="gpu")
+    turbo_generate.click(fn=generate_turbo_transfer, inputs=transfer_inputs,
+                         outputs=transfer_outputs, concurrency_id="gpu", api_name="turbo_transfer")
     return last_result, send_to_inpaint
 
 

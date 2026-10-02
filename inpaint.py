@@ -40,7 +40,7 @@ def editing_prompt(instruction):
 
 
 def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
-                keep_on_gpu, progress=None):
+                keep_on_gpu, progress=None, turbo_preview=False):
     original = prepare_image(image)
     prompt = editing_prompt(instruction)
     step_count = int(steps)
@@ -54,7 +54,8 @@ def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
         from core_runtime import run_inpaint as run_core_inpaint
 
         return run_core_inpaint(runtime, original, prompt, used_seed, step_count,
-                                megapixels, keep_on_gpu, progress=progress)
+                                megapixels, keep_on_gpu, progress=progress,
+                                turbo_preview=turbo_preview)
 
     import torch
 
@@ -93,7 +94,8 @@ def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
         gc.collect()
         torch.cuda.empty_cache()
 
-    result = generated.resize(original.size, Image.Resampling.LANCZOS)
+    result = generated if turbo_preview else generated.resize(original.size, Image.Resampling.LANCZOS)
+    comparison_input = original.resize(result.size, Image.Resampling.LANCZOS) if turbo_preview else original
     runtime.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     filename = runtime.OUTPUT_DIR / f"floyd-inpaint-{datetime.now():%Y%m%d-%H%M%S-%f}-seed-{used_seed}.png"
     metadata = PngImagePlugin.PngInfo()
@@ -101,16 +103,17 @@ def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
     metadata.add_text("prompt", prompt)
     metadata.add_text("seed", str(used_seed))
     result.save(filename, pnginfo=metadata)
+    size_note = "Turbo preview saved at working size. " if turbo_preview else "Original dimensions retained. "
     status = (
         f"Saved {filename.name}  \n"
         f"Seed: {used_seed} | Time: {time.perf_counter() - started:.1f} s | "
         f"Working canvas: {width} × {height} | Base model | "
         f"Cache: {'reused' if cache_hit else 'encoded'}  \n"
-        "Original dimensions retained. The model may change details outside the requested object."
+        f"{size_note}The model may change details outside the requested object."
     )
     if progress is not None:
         progress(1, desc="Saved")
-    return (original, result), str(filename), status, str(used_seed), result
+    return (comparison_input, result), str(filename), status, str(used_seed), result
 
 
 def build_inpaint_ui(gr, runtime):
@@ -133,6 +136,10 @@ def build_inpaint_ui(gr, runtime):
         )
     generate = gr.Button(
         "Generate edit · Ctrl+Enter", variant="primary", elem_id="ggf-inpaint-button",
+    )
+    turbo_generate = gr.Button(
+        "Turbo preview · half-size", variant="secondary", elem_id="ggf-inpaint-turbo",
+        visible=runtime.model_profile() == "standard",
     )
     with gr.Accordion("Edit settings", open=False):
         with gr.Row():
@@ -159,18 +166,28 @@ def build_inpaint_ui(gr, runtime):
     release = gr.Button("Release models / free GPU memory")
 
     def generate_edit(input_image, text, seed_value, random_seed, step_count,
-                      resolution, resident, progress=gr.Progress()):
+                      resolution, resident, progress=gr.Progress(), turbo=False):
+        if turbo:
+            resolution = runtime.turbo_megapixels(resolution)
         pair, path, message, _used_seed, image = run_inpaint(
             runtime, input_image, text, seed_value, random_seed,
-            step_count, resolution, resident, progress=progress,
+            step_count, resolution, resident, progress=progress, turbo_preview=turbo,
         )
         return pair, gr.update(value=path, visible=True), message, image, gr.update(interactive=True)
 
+    inputs = [source, instruction, seed, randomize, steps, megapixels, keep_gpu]
+    outputs = [comparison, download, status, result_state, accept]
     generate.click(
         generate_edit,
-        inputs=[source, instruction, seed, randomize, steps, megapixels, keep_gpu],
-        outputs=[comparison, download, status, result_state, accept],
+        inputs=inputs, outputs=outputs,
         concurrency_id="gpu", api_name="inpaint", show_progress_on=[comparison],
+    )
+    def generate_turbo_edit(*args, progress=gr.Progress()):
+        return generate_edit(*args, progress=progress, turbo=True)
+
+    turbo_generate.click(
+        generate_turbo_edit, inputs=inputs, outputs=outputs,
+        concurrency_id="gpu", api_name="turbo_inpaint", show_progress_on=[comparison],
     )
 
     def accept_result(result):

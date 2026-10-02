@@ -255,7 +255,7 @@ class Engine:
         self.torch.cuda.synchronize()
         working_size = (pixels.shape[1], pixels.shape[0])
         result = Image.fromarray((pixels.detach().cpu().numpy().clip(0, 1) * 255).astype(np.uint8))
-        if result.size != original_size:
+        if request.get("restore_size", True) and result.size != original_size:
             result = result.resize(original_size, Image.Resampling.LANCZOS)
         output_dir.mkdir(parents=True, exist_ok=True)
         output = output_dir / f"floyd-inpaint-{int(time.time() * 1000)}-seed-{seed}.png"

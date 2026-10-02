@@ -56,6 +56,24 @@ class AppHelperTests(unittest.TestCase):
             self.assertEqual(editor["background"].tobytes(), result.tobytes())
             self.assertFalse(selected)
 
+    def test_turbo_preview_quarters_working_pixel_budget_without_changing_steps(self):
+        import gradio as gr
+        with gr.Blocks() as ui:
+            APP.build_likeness_ui(gr)
+        turbo = next(event for event in ui.fns.values()
+                     if event.name == "generate_turbo_transfer")
+        inputs = [None] * len(turbo.inputs)
+        inputs[7] = 6
+        inputs[8] = 1.0
+        inputs[9] = 2
+        with patch.object(APP, "run_swap_ui", return_value=((None, None), "out.png", "done", "42")) as run:
+            turbo.fn(*inputs)
+        submitted = run.call_args.args
+        self.assertEqual(submitted[7], 6)
+        self.assertEqual(submitted[8], .25)
+        self.assertEqual(submitted[9], 1)
+        self.assertTrue(run.call_args.kwargs["turbo_preview"])
+
     def test_inpaint_button_receives_latest_likeness_result(self):
         import sys
         import gradio as gr
