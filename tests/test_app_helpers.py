@@ -38,6 +38,9 @@ class AppHelperTests(unittest.TestCase):
             APP.build_likeness_ui(gr)
         generate = next(event for event in ui.fns.values() if event.name == "generate_transfer")
         reuse = next(event for event in ui.fns.values() if event.name == "result_as_body_input")
+        clear = next(event for event in ui.fns.values()
+                     if event.name == "<lambda>" and event.outputs == [reuse.outputs[0]])
+        self.assertIsNone(clear.fn())
         self.assertIs(generate.outputs[4], reuse.inputs[0])
         self.assertIsInstance(reuse.inputs[0], gr.State)
         self.assertFalse(generate.outputs[5].interactive)
@@ -55,6 +58,30 @@ class AppHelperTests(unittest.TestCase):
             editor, selected = reuse.fn(values[4])
             self.assertEqual(editor["background"].tobytes(), result.tobytes())
             self.assertFalse(selected)
+
+    def test_head_upload_is_reasserted_and_result_can_return_from_inpaint(self):
+        import sys
+
+        with patch.dict(sys.modules, {APP.__name__: APP}):
+            ui = APP.build_ui()
+        upload = next(event for event in ui.fns.values()
+                      if event.name == "retain_uploaded_head")
+        head = upload.inputs[0]
+        self.assertIs(head, upload.outputs[0])
+        image = Image.new("RGB", (40, 30), "blue")
+        retained = upload.fn(image)
+        self.assertEqual(retained.tobytes(), image.tobytes())
+        self.assertIsNot(retained, image)
+
+        open_likeness = next(event for event in ui.fns.values()
+                             if event.name == "open_likeness")
+        inpaint_generate = next(event for event in ui.fns.values()
+                                if event.name == "generate_edit")
+        self.assertIs(open_likeness.inputs[0], inpaint_generate.outputs[3])
+        editor, mask_enabled, tab_update = open_likeness.fn(image)
+        self.assertEqual(editor["background"].tobytes(), image.tobytes())
+        self.assertFalse(mask_enabled)
+        self.assertEqual(tab_update["selected"], "likeness")
 
     def test_turbo_preview_quarters_working_pixel_budget_without_changing_steps(self):
         import gradio as gr

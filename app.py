@@ -163,12 +163,35 @@ body, .gradio-container {
 """
 APP_JS = """
 () => {
+    // Gradio's occupied image surface can consume a drop as a clear action.
+    // Route the dropped file through its existing upload input instead.
+    document.addEventListener('dragover', (event) => {
+        if (!event.target.closest?.('#ggf-head-reference')) return;
+        if (!Array.from(event.dataTransfer?.items || []).some(item => item.kind === 'file')) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+    }, true);
+    document.addEventListener('drop', (event) => {
+        const head = event.target.closest?.('#ggf-head-reference');
+        if (!head) return;
+        const file = Array.from(event.dataTransfer?.files || []).find(file => file.type.startsWith('image/'));
+        if (!file) return;
+        const input = head.querySelector('input[type="file"]');
+        if (!input) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, true);
     document.addEventListener('keydown', (event) => {
         if (!event.ctrlKey || event.key !== 'Enter' || event.repeat) return;
-        const button = ['ggf-inpaint-button', 'ggf-swap-button']
+        const button = ['ggf-inpaint-turbo', 'ggf-swap-turbo',
+                        'ggf-inpaint-button', 'ggf-swap-button']
             .map(id => document.getElementById(id))
-            .find(button => button && button.getClientRects().length > 0);
-        if (!button || button.disabled) return;
+            .find(button => button && !button.disabled && button.getClientRects().length > 0);
+        if (!button) return;
         event.preventDefault();
         event.stopPropagation();
         button.click();
@@ -354,6 +377,11 @@ def result_as_body_input(result):
     if result is None:
         raise ValueError("Generate a likeness result first.")
     return {"background": result.copy(), "layers": [], "composite": result.copy()}, False
+
+
+def retain_uploaded_head(image):
+    """Reassert a completed upload after Gradio swaps an occupied image surface."""
+    return image.copy() if image is not None else None
 
 
 def model_profile() -> str:
@@ -778,16 +806,19 @@ def build_likeness_ui(gr):
             brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
             label="1 — BODY REFERENCE (required): pose, clothes, scene",
         )
-        head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity")
+        head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity",
+                        elem_id="ggf-head-reference")
     protect_editor_preprocessing(body)
     protect_head_preprocessing(head)
+    head.upload(retain_uploaded_head, inputs=[head], outputs=[head],
+                queue=False, show_progress="hidden", api_name=False)
     extra_prompt = gr.Textbox(
         label="Extra prompt", value="", lines=2,
         placeholder="For example: remove the hat; keep the head reference's hair.",
         info="Added to the end of the likeness instruction in Advanced settings.",
     )
-    generate = gr.Button("Transfer likeness · Ctrl+Enter", variant="primary", elem_id="ggf-swap-button")
-    turbo_generate = gr.Button("Turbo preview · half-size", variant="secondary",
+    generate = gr.Button("Transfer likeness", variant="primary", elem_id="ggf-swap-button")
+    turbo_generate = gr.Button("Turbo preview · half-size · Ctrl+Enter", variant="secondary",
                                elem_id="ggf-swap-turbo", visible=model_profile() == "standard")
     output = gr.ImageSlider(
         type="pil", format="png", interactive=False,
@@ -797,8 +828,10 @@ def build_likeness_ui(gr):
     with gr.Row():
         reuse_result = gr.Button("Use result as new body reference", interactive=False)
         send_to_inpaint = gr.Button("Edit result in Inpaint", interactive=False)
-    reuse_result.click(fn=result_as_body_input, inputs=[last_result],
-                      outputs=[body, selected_only], api_name=False)
+    reuse_result.click(fn=lambda: None, outputs=[body], queue=False, api_name=False).then(
+        fn=result_as_body_input, inputs=[last_result], outputs=[body, selected_only],
+        api_name=False,
+    )
     gr.Markdown(
         "**Edit painted area:** paint the intended head; only that area changes. "
         "**Protect painted area (experimental):** paint the heads to keep. When they are on one side, "
@@ -870,7 +903,7 @@ def build_likeness_ui(gr):
                    concurrency_id="gpu")
     turbo_generate.click(fn=generate_turbo_transfer, inputs=transfer_inputs,
                          outputs=transfer_outputs, concurrency_id="gpu", api_name="turbo_transfer")
-    return last_result, send_to_inpaint
+    return body, selected_only, last_result, send_to_inpaint
 
 
 def build_ui():
@@ -895,9 +928,9 @@ def build_ui():
                         elem_classes="warning")
             with gr.Tabs() as tabs:
                 with gr.Tab("Likeness Transfer", id="likeness"):
-                    likeness_result, send_to_inpaint = build_likeness_ui(gr)
+                    body_input, body_mask, likeness_result, send_to_inpaint = build_likeness_ui(gr)
                 with gr.Tab("Inpaint", id="inpaint"):
-                    inpaint_input = build_inpaint_ui(gr, sys.modules[__name__])
+                    inpaint_input, inpaint_result, send_to_likeness = build_inpaint_ui(gr, sys.modules[__name__])
 
             def open_inpaint(result):
                 if result is None:
@@ -905,6 +938,15 @@ def build_ui():
                 return result, gr.update(selected="inpaint")
 
             send_to_inpaint.click(open_inpaint, inputs=[likeness_result], outputs=[inpaint_input, tabs], api_name=False)
+
+            def open_likeness(result):
+                editor, mask_enabled = result_as_body_input(result)
+                return editor, mask_enabled, gr.update(selected="likeness")
+
+            send_to_likeness.click(fn=lambda: None, outputs=[body_input], queue=False, api_name=False).then(
+                open_likeness, inputs=[inpaint_result], outputs=[body_input, body_mask, tabs],
+                api_name=False,
+            )
             gr.HTML(
                 '<footer class="ggf-footer">Runs on your computer by default. Interface packaged by '
                 '<a href="https://getgoingfast.pro" target="_blank" rel="noopener noreferrer">Get Going Fast</a>. '

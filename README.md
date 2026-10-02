@@ -98,7 +98,8 @@ GPU apps before testing. Standard mode remains unchanged.
 
 In the app, add the body/base image on the left and the head reference in the
 middle. Optionally enter an **Extra prompt** such as “Remove the hat.” Click
-**Transfer likeness**, or press **Ctrl+Enter**. Generated PNG files are saved in
+**Transfer likeness** for a full-size result, or press **Ctrl+Enter** for a
+half-size Turbo preview on the standard profile. Generated PNG files are saved in
 `outputs/` in this source checkout.
 
 On a standard-profile install, **Turbo preview · half-size** runs the same
@@ -110,12 +111,17 @@ painted-area edit, the preview is resampled after compositing, so unpainted
 pixels will not remain byte-identical to the full-resolution input.
 
 On the **Inpaint** tab, upload one image, type an instruction such as “remove the
-hat,” and click **Generate edit** or press **Ctrl+Enter**. The result appears
+hat,” and click **Generate edit** for a full-size result or press **Ctrl+Enter**
+for a Turbo preview on the standard profile. The result appears
 beside the input with a before/after slider. **Use result for the next edit**
 loads it as the new input. This is prompt-based full-image editing: the model may
 also change details outside the requested object. No drawing or mask is used.
 Inpaint runs the base Qwen Image 2.1 model with both LoRAs disabled. Its default
 is 40 steps because the six-step setting depends on the Viggle Turbo LoRA.
+After an edit, **Send result to Likeness Transfer** places that result in the
+body reference slot and opens the Likeness Transfer tab. The head reference is
+left unchanged. **Use result as new body reference** on Likeness Transfer now
+clears the previous editor image and loads the result with one click.
 The BFS and Viggle Turbo LoRAs remain available in Likeness Transfer.
 On a standard-profile installation, Inpaint now uses the same app-local Qwen
 inference core as Fast core likeness transfer. Low-VRAM profiles retain their
@@ -123,7 +129,8 @@ existing Diffusers offload path until the core is validated on those GPUs.
 The Inpaint tab has the same **Turbo preview · half-size** option on the
 standard profile. It saves the smaller native working image instead of
 resizing it back to the uploaded image's dimensions. Use the regular button
-for the full-size result.
+for the full-size result. On low-VRAM profiles, Ctrl+Enter falls back to the
+regular button because Turbo preview is unavailable there.
 
 ### Optional fast likeness engine
 

@@ -135,10 +135,10 @@ def build_inpaint_ui(gr, runtime):
             buttons=["fullscreen"], height=560, scale=1, min_width=440,
         )
     generate = gr.Button(
-        "Generate edit · Ctrl+Enter", variant="primary", elem_id="ggf-inpaint-button",
+        "Generate edit", variant="primary", elem_id="ggf-inpaint-button",
     )
     turbo_generate = gr.Button(
-        "Turbo preview · half-size", variant="secondary", elem_id="ggf-inpaint-turbo",
+        "Turbo preview · half-size · Ctrl+Enter", variant="secondary", elem_id="ggf-inpaint-turbo",
         visible=runtime.model_profile() == "standard",
     )
     with gr.Accordion("Edit settings", open=False):
@@ -163,6 +163,7 @@ def build_inpaint_ui(gr, runtime):
     with gr.Row():
         download = gr.DownloadButton("Download PNG", value=None, visible=False, size="sm")
         accept = gr.Button("Use result for the next edit", interactive=False)
+        send_to_likeness = gr.Button("Send result to Likeness Transfer", interactive=False)
     release = gr.Button("Release models / free GPU memory")
 
     def generate_edit(input_image, text, seed_value, random_seed, step_count,
@@ -173,10 +174,11 @@ def build_inpaint_ui(gr, runtime):
             runtime, input_image, text, seed_value, random_seed,
             step_count, resolution, resident, progress=progress, turbo_preview=turbo,
         )
-        return pair, gr.update(value=path, visible=True), message, image, gr.update(interactive=True)
+        return (pair, gr.update(value=path, visible=True), message, image,
+                gr.update(interactive=True), gr.update(interactive=True))
 
     inputs = [source, instruction, seed, randomize, steps, megapixels, keep_gpu]
-    outputs = [comparison, download, status, result_state, accept]
+    outputs = [comparison, download, status, result_state, accept, send_to_likeness]
     generate.click(
         generate_edit,
         inputs=inputs, outputs=outputs,
@@ -198,8 +200,8 @@ def build_inpaint_ui(gr, runtime):
     accept.click(accept_result, inputs=[result_state], outputs=[source, accept], api_name=False)
     source.change(
         lambda: (None, None, gr.update(value=None, visible=False),
-                 gr.update(interactive=False), ""),
-        outputs=[comparison, result_state, download, accept, status],
+                 gr.update(interactive=False), gr.update(interactive=False), ""),
+        outputs=[comparison, result_state, download, accept, send_to_likeness, status],
         show_progress="hidden", queue=False, api_name=False,
     )
     release.click(runtime.release_models, outputs=[status], concurrency_id="gpu")
@@ -208,4 +210,4 @@ def build_inpaint_ui(gr, runtime):
         "keep their existing offload path. Both LoRAs are disabled for this tab.",
         elem_classes="ggf-guide",
     )
-    return source
+    return source, result_state, send_to_likeness
