@@ -8,3 +8,10 @@ pillow>=11.3.0,<13
 gradio>=5.49.0,<7
 sentencepiece>=0.2.1,<1
 gdown>=6.4,<7
+einops==0.8.2
+torchsde==0.2.6
+scipy>=1.11,<2
+comfy-kitchen==0.2.35
+comfy-aimdo==0.5.5
+blake3>=1,<2
+av>=17,<19

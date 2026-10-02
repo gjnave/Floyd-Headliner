@@ -57,6 +57,9 @@ def run_inpaint(runtime, image, instruction, seed, randomize, steps, megapixels,
     if progress is not None:
         progress(.02, desc="Loading the base model")
     with runtime._PIPELINE_LOCK:
+        # The optional likeness fast core keeps a separate large model set.
+        # Release it before loading the standalone base model for Inpaint.
+        runtime.release_core_models()
         pipe = runtime._load_pipeline()
         runtime.configure_speed_mode(pipe, keep_on_gpu, width, height)
         # The shared pipeline keeps adapters for Likeness Transfer. None are

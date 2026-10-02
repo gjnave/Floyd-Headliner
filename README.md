@@ -13,7 +13,9 @@ Floyd Headliner is a local Windows likeness-transfer app: provide a **body refer
 for pose, clothing, and scene, then a **head reference** for face, hair, and
 likeness. It recreates the active image-edit path from
 `Qwen-Image-2_1-BFS-Character-Swap-Image-Edit-I2I.json` as a direct Python app.
-It is standalone and does not require ComfyUI.
+Neither likeness-transfer engine requires a ComfyUI installation or server.
+The optional Fast core includes the inference modules it needs inside this
+app, similarly to MagicQuill's embedded-core approach.
 
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
@@ -32,9 +34,10 @@ git clone https://codeberg.org/Cognibuild/Floyd-Headliner
 cd Floyd-Headliner
 uv venv --python 3.11 .venv
 uv pip install --python .venv\Scripts\python.exe --upgrade pip setuptools wheel
-uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu130
+uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe download_models.py
+.venv\Scripts\python.exe download_fast_models.py
 .venv\Scripts\python.exe app.py
 ```
 
@@ -106,6 +109,33 @@ also change details outside the requested object. No drawing or mask is used.
 Inpaint runs the base Qwen Image 2.1 model with both LoRAs disabled. Its default
 is 40 steps because the six-step setting depends on the Viggle Turbo LoRA.
 The BFS and Viggle Turbo LoRAs remain available in Likeness Transfer.
+
+### Optional fast likeness engine
+
+On a standard-profile installation with the app-local fast-core model files,
+**Advanced likeness settings →
+Likeness-transfer engine** offers **Fast core** and **Standalone**. Fast core
+is selected by default when detected. The same body/head inputs, prompts,
+before/after slider, painted-area controls, result reuse, and Inpaint tab
+remain in the existing interface. Inpaint still uses the standalone base model
+with no LoRAs. Switching between Fast core and Inpaint releases the other
+engine's GPU models before loading a second set.
+
+Fast core is optional and currently experimental. Its source modules are in
+`vendor/comfy_core/` and run under this app's `.venv`; its INT8 model and text
+encoder plus VAE are in `models/fast-core/`. The standard-mode installer
+downloads these three model files (about 17 GB total) and reuses the existing
+BFS and Viggle LoRAs. No ComfyUI application, server, or Python environment is
+installed. Low-VRAM profiles keep the standalone engine because Fast core has
+only been tested on the local RTX 4090. The embedded Comfy-derived modules are
+third-party GPLv3 code; see `vendor/comfy_core/LICENSE` and `SOURCE.md` there.
+
+Matched local speed check: two fixed reference images, 1376 × 768 working
+canvas, six steps, 2× output, and four seeds. Including model/worker startup,
+the first image took 22.5 seconds with Fast core versus 37.5 seconds with
+Standalone. Cached repeats had medians of 4.1 versus 9.3 seconds. Results
+are not pixel-identical because the engines use different model precision
+and sampling. Review output quality before adopting Fast core for a release.
 
 For likeness transfer, **Protect painted area (experimental)** hides painted heads
 from the input seen by the model, then restores those regions from the original.

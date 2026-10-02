@@ -414,10 +414,18 @@ class AppHelperTests(unittest.TestCase):
         with patch("subprocess.check_output", side_effect=OSError("missing")):
             self.assertEqual(APP.global_free_vram_bytes(FakeTorch), 123456)
 
-    def test_source_has_no_comfyui_runtime_dependency(self):
+    def test_optional_core_preserves_standalone_engine(self):
         source = APP_PATH.read_text(encoding="utf-8").lower()
         self.assertNotIn("import comfy", source)
-        self.assertNotIn("comfyui", source)
+        self.assertIn("standalone (diffusers)", source)
+        self.assertIn("from core_runtime import", source)
+
+    def test_fast_core_defaults_to_app_local_files(self):
+        import core_runtime
+
+        self.assertEqual(core_runtime.CORE_ROOT, APP_PATH.parent / "vendor" / "comfy_core")
+        self.assertEqual(core_runtime.MODEL_ROOT, APP_PATH.parent / "models" / "fast-core")
+        self.assertTrue((core_runtime.CORE_ROOT / "nodes.py").is_file())
 
 
 if __name__ == "__main__":

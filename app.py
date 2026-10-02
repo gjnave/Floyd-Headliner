@@ -26,6 +26,9 @@ BASE_MODEL_DIR = MODELS_DIR / "Qwen-Image-2.1"
 LORA_DIR = MODELS_DIR / "loras"
 OUTPUT_DIR = APP_DIR / "outputs"
 
+FAST_CORE_LABEL = "Fast core (app-local; experimental)"
+STANDALONE_LABEL = "Standalone (Diffusers)"
+
 BASE_MODEL_MARKER = BASE_MODEL_DIR / "model_index.json"
 BFS_LORA = LORA_DIR / "bfs_head_v1.1_alternative_qwen_2.1.safetensors"
 TURBO_LORA = LORA_DIR / "Qwen-Image-2.1-viggle-turbo-v0.2.1-6step-lora-r256.safetensors"
@@ -591,8 +594,8 @@ def configure_speed_mode(pipe, keep_on_gpu, width, height):
         _OFFLOAD_MODE = "component CPU offload"
 
 
-def release_models():
-    """Release in-memory models/caches only. Never remove any files."""
+def release_standalone_models():
+    """Release the original in-memory pipeline without removing files."""
     global _PIPELINE, _OFFLOAD_MODE, _RESIDENT_ALLOWED
     import torch
 
@@ -606,6 +609,18 @@ def release_models():
         gc.collect()
         torch.cuda.empty_cache()
     return "Models released from memory. Model files and saved images are unchanged. The next swap reloads the models."
+
+
+def release_core_models():
+    from core_runtime import release_models as release_fast_core
+
+    return release_fast_core()
+
+
+def release_models():
+    """Release both inference engines without removing model or output files."""
+    release_core_models()
+    return release_standalone_models()
 
 
 def run_swap(
@@ -624,7 +639,19 @@ def run_swap(
     selected_only: bool = False,
     feather: float = 8,
     mask_mode: str = "Edit painted area",
+    backend: str = STANDALONE_LABEL,
 ):
+    if backend == FAST_CORE_LABEL:
+        from core_runtime import run_swap as run_fast_core
+
+        return run_fast_core(
+            sys.modules[__name__], body_image, head_image, prompt, seed,
+            randomize_seed, bfs_strength, turbo_strength, steps,
+            working_megapixels, output_upscale, keep_on_gpu, extra_prompt,
+            selected_only, feather, mask_mode,
+        )
+    if backend != STANDALONE_LABEL:
+        raise ValueError("Choose a valid likeness-transfer engine.")
     if body_image is None:
         raise ValueError("Add the body/base image (Image 1).")
     if head_image is None:
@@ -773,6 +800,16 @@ def build_likeness_ui(gr):
     )
     with gr.Accordion("Advanced likeness settings", open=False):
         prompt = gr.Textbox(label="Likeness instruction (keep <image1> and <image2>)", value=DEFAULT_PROMPT, lines=5)
+        from core_runtime import available as fast_core_available
+
+        fast_ready = fast_core_available() and model_profile() == "standard"
+        backend = gr.Radio(
+            [FAST_CORE_LABEL, STANDALONE_LABEL] if fast_ready else [STANDALONE_LABEL],
+            value=FAST_CORE_LABEL if fast_ready else STANDALONE_LABEL,
+            label="Likeness-transfer engine",
+            info="Fast core uses bundled inference modules and app-local model files; "
+                 "no ComfyUI installation or server. Inpaint remains standalone.",
+        )
         with gr.Row():
             seed = gr.Number(label="Seed", value=42, precision=0)
             randomize = gr.Checkbox(label="Randomize seed", value=True)
@@ -807,7 +844,8 @@ def build_likeness_ui(gr):
     generate.click(
         fn=generate_transfer,
         inputs=[body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
-                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather, mask_mode],
+                working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather,
+                mask_mode, backend],
         outputs=[output, saved_file, status, used_seed, last_result, reuse_result, send_to_inpaint], concurrency_id="gpu",
     )
     return last_result, send_to_inpaint
@@ -871,6 +909,9 @@ def self_check() -> int:
     print(f"Diffusers: {diffusers.__version__}")
     print(f"Transformers: {transformers.__version__}")
     print(f"Gradio: {gradio.__version__}")
+    from core_runtime import available as fast_core_available
+
+    print(f"Optional fast core: {'available' if fast_core_available() else 'not installed'}")
     if model_profile() != "standard":
         import bitsandbytes
 
