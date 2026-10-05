@@ -10,6 +10,7 @@ __pycache__/
 *.ckpt
 *.pt
 *.pth
+network_settings.json
 
 # Member-only installer and local test output stay out of the public repo.
 1-INSTALL-Floyd-Headliner.bat

@@ -20,6 +20,22 @@ app, similarly to MagicQuill's embedded-core approach.
 The Qwen Image 2.1 base model and BFS/Viggle adapters come from their original
 publishers; Get Going Fast does not claim ownership of those models.
 
+## Optional network access
+
+Headliner opens on this computer only by default. In the app's **Settings** tab,
+you can choose **Local network (LAN)** or a **Temporary public link**. A password
+is optional: any nonblank password is accepted, and an empty password means no
+login, including when replacing a previously saved password. If you set a
+password but leave the username blank, the username defaults to `ggf`. Close
+and restart the app to apply the change. The current address is shown in
+Settings and in the server window. With no login, anyone with the address can
+generate images and change app settings. A public link exists only while the
+app is running.
+
+When a password is set, its salted hash is saved locally in
+`network_settings.json`. That file is excluded from Git and must not be
+included in shared ZIPs.
+
 ## Install and run from source
 
 For guided setup, use the [Quick Setup Helper](https://getgoingfast.pro/tools/floydheadliner)

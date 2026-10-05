@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageChops, ImageFilter
+from network_settings import read_settings, save_settings, verify_login
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -27,6 +28,9 @@ MODELS_DIR = APP_DIR / "models"
 BASE_MODEL_DIR = MODELS_DIR / "Qwen-Image-2.1"
 LORA_DIR = MODELS_DIR / "loras"
 OUTPUT_DIR = APP_DIR / "outputs"
+ACTIVE_MODE = "local"
+ACTIVE_URL = ""
+ACTIVE_AUTH_ENABLED = False
 
 FAST_CORE_LABEL = "Fast core (app-local; experimental)"
 STANDALONE_LABEL = "Standalone (Diffusers)"
@@ -161,6 +165,24 @@ body, .gradio-container {
     color: var(--ggf-muted) !important;
     opacity: 1;
 }
+/* Gradio 6's dropdown menu otherwise keeps its white Base-theme surface. */
+#ggf-network-mode .options {
+    background: var(--ggf-panel) !important;
+    color: var(--ggf-ink) !important;
+    border: 1px solid var(--ggf-line) !important;
+}
+#ggf-network-mode .options .item {
+    color: var(--ggf-ink) !important;
+}
+#ggf-network-mode .options .item:hover,
+#ggf-network-mode .options .item.active {
+    background: #172a43 !important;
+}
+#ggf-network-password input[type="password"] {
+    background: #091425 !important;
+    color: var(--ggf-ink) !important;
+    caret-color: var(--ggf-gold);
+}
 .ggf-status code {
     background: #172a43 !important;
     color: var(--ggf-ink) !important;
@@ -198,7 +220,39 @@ body, .gradio-container {
 .tab-nav button.selected { color: var(--ggf-gold) !important; }
 .ggf-footer { color: var(--ggf-muted); text-align: center; margin-top: 20px; font-size: .88rem; }
 @media (max-width: 900px) { .ggf-hero { grid-template-columns: minmax(0, 1fr) 110px; } .ggf-hero-slogan { grid-column: 1 / -1; grid-row: 2; } .ggf-hero-logo { width: 110px; height: 110px; } }
-@media (max-width: 680px) { .app-shell { padding: 10px 6px 24px; } .ggf-hero { padding: 18px; gap: 12px; } .ggf-hero-logo { width: 80px; height: 80px; } }
+@media (max-width: 680px) {
+    /* Gradio adds 32px outer gutters; reclaim them inside our own column. */
+    .app-shell {
+        padding: 8px 6px 24px;
+        margin-left: -20px !important;
+        margin-right: -20px !important;
+        width: calc(100% + 40px) !important;
+    }
+    #ggf-hero-block .html-container { padding: 0 !important; }
+    .ggf-hero {
+        display: block;
+        padding: 14px 16px;
+        margin-bottom: 10px;
+        border-radius: 14px;
+    }
+    .ggf-hero .ggf-kicker { font-size: .68rem; letter-spacing: .1em; }
+    .ggf-hero h1 { font-size: clamp(1.55rem, 7vw, 2rem); line-height: 1.1; margin: 5px 0; }
+    .ggf-hero p { font-size: .9rem; margin-bottom: 5px; }
+    .ggf-profile { font-size: .76rem; padding: 3px 8px; margin: 4px 0 8px; }
+    .ggf-hero .ggf-links { gap: 4px 14px; }
+    .ggf-hero .ggf-links a { font-size: .82rem; overflow-wrap: anywhere; }
+    .ggf-hero-slogan, .ggf-hero-logo { display: none; }
+    .ggf-update-row { display: flex; flex-wrap: nowrap; gap: 8px; }
+    .ggf-update-row > * { min-width: 0 !important; flex: 1 1 0 !important; }
+    .ggf-update-row button { min-width: 0 !important; width: 100%; font-size: .8rem; }
+    .ggf-update-status { font-size: .8rem; margin: 0 0 8px; }
+    #ggf-reference-row { flex-direction: column; }
+    #ggf-reference-row > * {
+        width: 100% !important;
+        min-width: 0 !important;
+        flex: 0 0 auto !important;
+    }
+}
 """
 APP_JS = """
 () => {
@@ -342,23 +396,6 @@ def has_painted_mask(body_input) -> bool:
     return False
 
 
-def painted_mask_from_editor_payload(editor, raw_input):
-    """Read editor changes without making a transient PNG decode a Gradio error."""
-    if raw_input is None:
-        return False
-    for attempt in range(3):
-        try:
-            payload = editor.data_model.model_validate(raw_input)
-            return has_painted_mask(editor.preprocess(payload))
-        except (OSError, SyntaxError):
-            if attempt < 2:
-                time.sleep(0.15 * (attempt + 1))
-    import gradio as gr
-
-    gr.Warning("The body image is still being prepared. Wait a moment, then paint again or re-upload it before generating.")
-    return gr.skip()
-
-
 def protect_editor_preprocessing(editor):
     """Retry incomplete cache reads at the component boundary, including Generate."""
     original_preprocess = editor.preprocess
@@ -368,7 +405,13 @@ def protect_editor_preprocessing(editor):
             try:
                 from upload_safety import validate_component_images
                 validate_component_images(payload)
-                return original_preprocess(payload)
+                value = original_preprocess(payload)
+                if payload is not None and (not value or value.get("background") is None):
+                    raise ValueError(
+                        "The body image upload is not ready or has expired. "
+                        "Upload it again, wait for its preview, then generate."
+                    )
+                return value
             except ValueError as error:
                 import gradio as gr
                 raise gr.Error(str(error)) from error
@@ -849,9 +892,9 @@ def run_swap(
 
     import torch
 
-    # The editor's decoded layers are the source of truth. Its asynchronous
-    # checkbox update can lag behind a final brush stroke and the Generate click.
-    selected_only = bool(selected_only or has_painted_mask(body_image))
+    # A stray mobile touch can paint a tiny mark. Only an explicitly enabled
+    # mask may constrain generation; erasing it disables mask mode.
+    selected_only = bool(selected_only and has_painted_mask(body_image))
     original, mask, crop = prepare_selection(body_image, selected_only)
     if mask_mode not in ("Edit painted area", "Protect painted area (experimental)"):
         raise ValueError("Choose a valid painted-area mode.")
@@ -945,11 +988,11 @@ def build_likeness_ui(gr):
         "**2. HEAD REFERENCE:** supplies the face, head, hair, and identity. Both images are required.",
         elem_classes="ggf-guide",
     )
-    selected_only = gr.Checkbox(label="Use painted mask (painting enables this)", value=False)
+    selected_only = gr.Checkbox(label="Use painted mask (optional; check after painting)", value=False)
     mask_mode = gr.Radio(["Edit painted area", "Protect painted area (experimental)"],
                         value="Edit painted area", label="Painted area",
                         info="Protect: cover the entire head you want kept, including hair. For two people, the model focuses on the opposite side.")
-    with gr.Row():
+    with gr.Row(elem_id="ggf-reference-row"):
         body = gr.ImageEditor(
             type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
             brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
@@ -960,6 +1003,10 @@ def build_likeness_ui(gr):
                         elem_id="ggf-head-reference")
     protect_editor_preprocessing(body)
     protect_head_preprocessing(head)
+    body.upload(lambda: False, outputs=[selected_only], queue=False,
+                show_progress="hidden", api_name=False)
+    body.clear(lambda: False, outputs=[selected_only], queue=False,
+               show_progress="hidden", api_name=False)
     head.upload(retain_uploaded_head, inputs=[head], outputs=[head],
                 queue=False, show_progress="hidden", api_name=False)
     extra_prompt = gr.Textbox(
@@ -986,15 +1033,14 @@ def build_likeness_ui(gr):
         "**Edit painted area:** paint the intended head; only that area changes. "
         "**Protect painted area (experimental):** paint the heads to keep. When they are on one side, "
         "the model works on the other side; protected pixels are restored. Everything else can change. "
-        "Leave one target head visible. Painting enables the mask; clearing it turns the mask off.",
+        "Leave one target head visible. Check 'Use painted mask' after painting; "
+        "stray touches are ignored while it is unchecked. Empty masks are ignored when generating.",
         elem_classes="ggf-guide",
     )
     feather = gr.Slider(0, 32, value=8, step=1, label="Selection edge softness (original-image pixels)")
-    body.change(
-        fn=lambda raw: painted_mask_from_editor_payload(body, raw),
-        inputs=[body], outputs=[selected_only], preprocess=False,
-        trigger_mode="always_last", show_progress="hidden",
-    )
+    # Do not read the editor from a change listener. That uploads the entire
+    # background/composite again on each edit, and preprocess() consumes Gradio's
+    # one-use blob cache. Validate masks only in the generation request instead.
     with gr.Accordion("Advanced likeness settings", open=False):
         prompt = gr.Textbox(label="Likeness instruction (keep <image1> and <image2>)", value=DEFAULT_PROMPT, lines=5)
         from core_runtime import available as fast_core_available
@@ -1077,7 +1123,8 @@ def build_ui():
                 '</nav></div>'
                 '<div class="ggf-hero-slogan">Your Time Is Limited.<br><strong>Get Going Fast.</strong></div>'
                 f'{hero_logo_html()}'
-                '</header>'
+                '</header>',
+                elem_id="ggf-hero-block",
             )
             with gr.Row(elem_classes="ggf-update-row"):
                 check_updates = gr.Button("Check for updates", variant="secondary", size="sm", scale=0,
@@ -1107,6 +1154,38 @@ def build_ui():
                 with gr.Tab("Inpaint", id="inpaint"):
                     (inpaint_input, inpaint_result, send_to_likeness,
                      inpaint_reset_outputs, clear_inpaint_result) = build_inpaint_ui(gr, sys.modules[__name__])
+                with gr.Tab("Settings", id="settings"):
+                    with gr.Accordion("Network access", open=True):
+                        gr.Markdown("Choose where Headliner can be opened. Changes take effect after restarting the server. "
+                                    "A public link with no password can be used by anyone who has the link, including to change these settings.")
+                        current_network = gr.Markdown(active_network_status())
+                        gr.Button("Refresh current address").click(
+                            active_network_status, outputs=current_network, queue=False, api_name=False)
+                        network_config = read_settings()
+                        network_mode = gr.Dropdown(
+                            label="Access mode",
+                            choices=[("This computer only", "local"), ("Local network (LAN)", "lan"),
+                                     ("Temporary public link", "public")],
+                            value=network_config["mode"],
+                            elem_id="ggf-network-mode",
+                        )
+                        network_user = gr.Textbox(label="Username (optional; defaults to ggf if using a password)",
+                                                  value=network_config["username"], max_lines=1)
+                        network_password = gr.Textbox(label="Password (optional; blank means no login)",
+                                                      type="password", value="", max_lines=1,
+                                                      elem_id="ggf-network-password")
+                        gr.Markdown("LAN access may prompt for a Windows Firewall rule. A temporary public link uses "
+                                    "Gradio sharing. Any nonblank password you enter is accepted. Leaving it blank "
+                                    "disables login after restart, even if a password was set before. "
+                                    "Passwords that are set are stored locally as salted hashes.")
+                        network_saved = gr.Markdown("")
+                        gr.Button("Save network settings").click(
+                            save_network_mode,
+                            inputs=[network_mode, network_user, network_password],
+                            outputs=[network_saved, network_password],
+                            queue=False, api_name=False,
+                        )
+                    demo.load(active_network_status, outputs=current_network, queue=False, api_name=False)
 
             def open_inpaint(result):
                 if result is None:
@@ -1199,7 +1278,32 @@ def local_port_in_use(port: int) -> bool:
         return connection.connect_ex(("127.0.0.1", port)) == 0
 
 
+def save_network_mode(mode: str, username: str, password: str):
+    import gradio as gr
+
+    try:
+        saved = save_settings(mode, username, password)
+    except ValueError as error:
+        return f"**Not saved:** {error}", gr.update()
+    except OSError as error:
+        return f"**Not saved:** Could not write network settings ({error}).", gr.update()
+    label = {"local": "This computer only", "lan": "Local network", "public": "Temporary public link"}[saved["mode"]]
+    access_note = (f"Login will use username **{saved['username']}** and the password you entered."
+                   if saved["digest"] else
+                   "**No login will be required. Anyone with the address can use the app and change Settings.**")
+    return (f"Saved **{label}**. {access_note} Close this server and start Floyd Headliner again to apply it. "
+            "The current address remains unchanged until restart."), ""
+
+
+def active_network_status() -> str:
+    label = {"local": "This computer only", "lan": "Local network", "public": "Temporary public link"}[ACTIVE_MODE]
+    login = "Required" if ACTIVE_AUTH_ENABLED else "None"
+    return f"**Running mode:** {label}  \n**Login:** {login}  \n**Current address:** {ACTIVE_URL or 'Starting...'}"
+
+
 def main() -> int:
+    global ACTIVE_MODE, ACTIVE_URL, ACTIVE_AUTH_ENABLED
+
     parser = argparse.ArgumentParser(description="Standalone Floyd Headliner")
     parser.add_argument("--self-check", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
@@ -1212,7 +1316,20 @@ def main() -> int:
     if args.self_check:
         return self_check()
 
-    if args.host in ("127.0.0.1", "localhost"):
+    try:
+        settings = read_settings()
+    except ValueError as error:
+        print(f"Network settings error: {error}")
+        print("The app was not exposed. Repair the local network_settings.json file before restarting.")
+        return 1
+    ACTIVE_MODE = settings["mode"]
+    ACTIVE_AUTH_ENABLED = ACTIVE_MODE != "local" and bool(settings["digest"])
+    if args.host not in ("127.0.0.1", "localhost"):
+        print("--host cannot change network exposure. Choose LAN or public access in Settings instead.")
+        return 1
+    access = {"local": "127.0.0.1", "lan": "0.0.0.0", "public": "127.0.0.1"}[ACTIVE_MODE]
+
+    if ACTIVE_MODE == "local":
         ports = (args.port,) if args.port is not None else range(7860, 7870)
         for port in ports:
             if existing_local_app(port):
@@ -1230,15 +1347,28 @@ def main() -> int:
         return 1
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     demo = build_ui()
-    demo.queue(default_concurrency_limit=1).launch(
-        server_name=args.host,
+    auth = None if not ACTIVE_AUTH_ENABLED else (
+        lambda username, password: verify_login(username, password, settings)
+    )
+    _, local_url, public_url = demo.queue(default_concurrency_limit=1).launch(
+        server_name=access,
         server_port=args.port,
-        inbrowser=not args.no_browser,
+        inbrowser=ACTIVE_MODE == "local" and not args.no_browser,
+        share=ACTIVE_MODE == "public",
+        auth=auth,
         show_error=True,
         css=APP_CSS,
         js=APP_JS,
         allowed_paths=[str(OUTPUT_DIR)],
+        prevent_thread_lock=True,
     )
+    ACTIVE_URL = public_url or local_url
+    print(f"Floyd Headliner running in {ACTIVE_MODE} mode at {ACTIVE_URL}", flush=True)
+    if ACTIVE_MODE == "public" and not public_url:
+        demo.close()
+        print("Public share link could not be created. The server was closed.")
+        return 1
+    threading.Event().wait()
     return 0
 
 

@@ -213,7 +213,8 @@ def run_swap(runtime, body_image, head_image, prompt, seed, randomize_seed,
         raise ValueError("Choose valid BFS and Viggle LoRA strengths.")
 
     started = time.perf_counter()
-    selected_only = bool(selected_only or runtime.has_painted_mask(body_image))
+    # Mobile taps may leave a tiny brush layer; require the user's mask checkbox.
+    selected_only = bool(selected_only and runtime.has_painted_mask(body_image))
     original, mask, crop = runtime.prepare_selection(body_image, selected_only)
     head = ImageOps.exif_transpose(head_image).convert("RGB")
     effective_prompt = runtime.compose_prompt(prompt, extra_prompt)

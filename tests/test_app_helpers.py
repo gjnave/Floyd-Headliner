@@ -250,7 +250,7 @@ class AppHelperTests(unittest.TestCase):
                 result, _, status, _ = APP.run_swap(
                     {"background": original, "layers": [layer]}, Image.new("RGB", (32, 32)),
                     APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 2, False,
-                    selected_only=False, mask_mode="Protect painted area (experimental)", feather=0)
+                    selected_only=True, mask_mode="Protect painted area (experimental)", feather=0)
             self.assertLess(pipe.request["image"][0].width, original.width)
             self.assertEqual(result.size, original.size)
             self.assertEqual(result.getpixel(untouched), (0, 0, 255))
@@ -359,33 +359,88 @@ class AppHelperTests(unittest.TestCase):
         painted.putpixel((12, 15), (0, 0, 0, 0))
         self.assertFalse(APP.has_painted_mask({"background": background, "layers": [painted]}))
 
-    def test_mask_checkbox_retries_transient_editor_png_error(self):
-        background = Image.new("RGBA", (20, 20), "blue")
-        painted = Image.new("RGBA", background.size)
-        painted.putpixel((4, 5), (245, 185, 66, 255))
-        editor = SimpleNamespace(
-            data_model=SimpleNamespace(model_validate=lambda value: value),
-            preprocess=Mock(side_effect=[
-                SyntaxError("broken PNG file"),
-                OSError("image file is truncated"),
-                {"background": background, "layers": [painted]},
-            ]),
-        )
-        with patch.object(APP.time, "sleep") as sleep:
-            self.assertTrue(APP.painted_mask_from_editor_payload(editor, {"background": "cached"}))
-        self.assertEqual(editor.preprocess.call_count, 3)
-        self.assertEqual(sleep.call_count, 2)
+    def test_stray_paint_without_explicit_mask_uses_full_body(self):
+        body = Image.new("RGBA", (200, 100), "blue")
+        layer = Image.new("RGBA", body.size)
+        layer.putpixel((4, 5), (245, 185, 66, 255))
 
-    def test_mask_checkbox_keeps_previous_value_after_persistent_png_error(self):
-        editor = SimpleNamespace(
-            data_model=SimpleNamespace(model_validate=lambda value: value),
-            preprocess=Mock(side_effect=OSError("image file is truncated")),
+        class FakePipe:
+            prompt_cache_hit = False
+
+            def enable_lora(self): pass
+            def set_adapters(self, *args, **kwargs): pass
+            def __call__(self, **kwargs):
+                self.request = kwargs
+                return SimpleNamespace(images=[Image.new("RGB", (64, 64), "red")])
+
+        pipe = FakePipe()
+        with patch.object(APP, "_load_pipeline", return_value=pipe), \
+                patch.object(APP, "configure_speed_mode"), patch("torch.Generator"), \
+                patch.object(Image.Image, "save"), patch("torch.cuda.empty_cache"):
+            result, _, status, _ = APP.run_swap(
+                {"background": body, "layers": [layer]}, Image.new("RGB", (32, 32)),
+                APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 1, False,
+                selected_only=False,
+            )
+        self.assertEqual(pipe.request["image"][0].size, body.size)
+        self.assertEqual(result.getpixel((50, 50)), (255, 0, 0))
+        self.assertNotIn("Painted-area edit", status)
+
+    def test_fast_core_ignores_unchecked_paint(self):
+        import core_runtime
+
+        body = Image.new("RGBA", (200, 100), "blue")
+        layer = Image.new("RGBA", body.size)
+        layer.putpixel((4, 5), (245, 185, 66, 255))
+        submitted_sizes = []
+
+        def cached_input(image, output_dir):
+            submitted_sizes.append(image.size)
+            return Path("unused-test-image.png")
+
+        response = {
+            "output": "unused-test-result.png", "working_size": (64, 64),
+            "conditioning_cache_hit": False,
+        }
+        with patch.object(core_runtime, "available", return_value=True), \
+                patch.object(core_runtime, "_cached_input", side_effect=cached_input), \
+                patch.object(core_runtime.WORKER, "request", return_value=response), \
+                patch.object(APP, "_PIPELINE", None), \
+                patch.object(Image, "open", return_value=Image.new("RGB", (64, 64), "red")), \
+                patch.object(Image.Image, "save"):
+            result, _, status, _ = core_runtime.run_swap(
+                APP, {"background": body, "layers": [layer]}, Image.new("RGB", (32, 32)),
+                APP.DEFAULT_PROMPT, 42, False, 1, 1, 6, .5, 1, True, "", False, 8,
+                "Edit painted area",
+            )
+        self.assertEqual(submitted_sizes[0], body.size)
+        self.assertEqual(result.size, (64, 64))
+        self.assertNotIn("Painted-area result", status)
+
+    def test_upload_and_edit_do_not_consume_generation_input(self):
+        import gradio as gr
+        from gradio.components.image_editor import EditorData, EditorDataBlobs
+
+        with gr.Blocks() as ui:
+            APP.build_likeness_ui(gr)
+        generate = next(event for event in ui.fns.values() if event.name == "generate_transfer")
+        editor = generate.inputs[0]
+        for dependency in ui.config["dependencies"]:
+            for target, event_name in dependency["targets"]:
+                if target == editor._id:
+                    self.assertNotIn(event_name, ("change", "input", "edit"))
+                    self.assertEqual(dependency["inputs"], [])
+        stream = io.BytesIO()
+        Image.new("RGBA", (32, 24), "blue").save(stream, format="PNG")
+        editor.blob_storage["mobile-upload"] = EditorDataBlobs(
+            background=stream.getvalue(), layers=[], composite=stream.getvalue(),
         )
-        marker = object()
-        with patch.object(APP.time, "sleep"), patch("gradio.Warning") as warning, patch("gradio.skip", return_value=marker):
-            self.assertIs(APP.painted_mask_from_editor_payload(editor, {"background": "cached"}), marker)
-        self.assertEqual(editor.preprocess.call_count, 3)
-        warning.assert_called_once()
+        value = editor.preprocess(EditorData(id="mobile-upload"))
+        self.assertEqual(value["background"].size, (32, 24))
+        self.assertEqual(value["background"].getpixel((0, 0))[:3], (0, 0, 255))
+        # A consumed/expired upload must report a useful error, not an empty image.
+        with self.assertRaisesRegex(gr.Error, "upload is not ready or has expired"):
+            editor.preprocess(EditorData(id="mobile-upload"))
 
     def test_editor_ignores_paint_for_reference(self):
         body = Image.new("RGBA", (100, 80), "blue")
