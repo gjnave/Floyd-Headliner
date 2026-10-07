@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageChops, ImageFilter
-from network_settings import read_settings, save_settings, verify_login
+from network_settings import read_settings, save_settings, verify_login, launch_access_servers
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -30,6 +30,7 @@ LORA_DIR = MODELS_DIR / "loras"
 OUTPUT_DIR = APP_DIR / "outputs"
 ACTIVE_MODE = "local"
 ACTIVE_URL = ""
+ACTIVE_LOCAL_URL = ""
 ACTIVE_AUTH_ENABLED = False
 
 FAST_CORE_LABEL = "Fast core (app-local; experimental)"
@@ -217,6 +218,7 @@ body, .gradio-container {
 #ggf-swap-button, #ggf-inpaint-button { background: var(--ggf-gold) !important; color: #111827 !important; font-weight: 800 !important; }
 #ggf-swap-turbo, #ggf-inpaint-turbo { background: #172842 !important; color: var(--ggf-gold) !important; border: 1px solid var(--ggf-gold) !important; font-weight: 700 !important; }
 .tab-nav button { color: var(--ggf-ink) !important; }
+#ggf-body-upload { background: #172842 !important; color: #e8eef9 !important; border: 1px solid #45607f !important; }
 .tab-nav button.selected { color: var(--ggf-gold) !important; }
 .ggf-footer { color: var(--ggf-muted); text-align: center; margin-top: 20px; font-size: .88rem; }
 @media (max-width: 900px) { .ggf-hero { grid-template-columns: minmax(0, 1fr) 110px; } .ggf-hero-slogan { grid-column: 1 / -1; grid-row: 2; } .ggf-hero-logo { width: 110px; height: 110px; } }
@@ -307,7 +309,8 @@ APP_JS = """
         const item = Array.from(event.clipboardData?.items || [])
             .find(item => item.kind === 'file' && item.type.startsWith('image/'));
         const image = item?.getAsFile();
-        const input = target.querySelector('input[type="file"]');
+        const input = (targetId === 'ggf-body-reference'
+            ? document.getElementById('ggf-body-upload') : target)?.querySelector('input[type="file"]');
         if (!image || !input) return;
         const subtype = image.type.split('/')[1]?.split('+')[0] || 'png';
         const extension = subtype === 'jpeg' ? 'jpg' : subtype;
@@ -322,17 +325,18 @@ APP_JS = """
     // Gradio's occupied image surface can consume a drop as a clear action.
     // Route the dropped file through its existing upload input instead.
     document.addEventListener('dragover', (event) => {
-        if (!event.target.closest?.('#ggf-head-reference')) return;
+        if (!event.target.closest?.('#ggf-head-reference, #ggf-body-reference')) return;
         if (!Array.from(event.dataTransfer?.items || []).some(item => item.kind === 'file')) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = 'copy';
     }, true);
     document.addEventListener('drop', (event) => {
-        const head = event.target.closest?.('#ggf-head-reference');
+        const head = event.target.closest?.('#ggf-head-reference, #ggf-body-reference');
         if (!head) return;
         const file = Array.from(event.dataTransfer?.files || []).find(file => file.type.startsWith('image/'));
         if (!file) return;
-        const input = head.querySelector('input[type="file"]');
+        const input = (head.id === 'ggf-body-reference'
+            ? document.getElementById('ggf-body-upload') : head)?.querySelector('input[type="file"]');
         if (!input) return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -453,17 +457,20 @@ def prepare_selection(body_input, selected_only=False):
     background = body_input.get("background") if isinstance(body_input, dict) else body_input
     if background is None:
         raise ValueError("Add the body/base image (Image 1).")
-    body = ImageOps.exif_transpose(background).convert("RGB")
+    original = body_input.get("original") if isinstance(body_input, dict) else None
+    body = ImageOps.exif_transpose(original if original is not None else background).convert("RGB")
     if not selected_only:
         return body, None, None
-    mask = Image.new("L", body.size, 0)
+    mask = Image.new("L", background.size, 0)
     for layer in body_input.get("layers", []) if isinstance(body_input, dict) else []:
         if layer is None:
             continue
-        if layer.size != body.size or layer.mode != "RGBA":
+        if layer.size != background.size or layer.mode != "RGBA":
             raise ValueError("Selection does not match the body image. Upload it again and repaint.")
         mask = ImageChops.lighter(mask, layer.getchannel("A"))
     mask = mask.point(lambda value: 255 if value else 0)
+    if mask.size != body.size:
+        mask = mask.resize(body.size, Image.Resampling.NEAREST)
     box = mask.getbbox()
     if box is None:
         raise ValueError("Paint over the intended head first, or turn off 'Edit painted area only'.")
@@ -522,6 +529,30 @@ def result_as_body_input(result):
     if result is None:
         raise ValueError("Generate a likeness result first.")
     return {"background": result.copy(), "layers": [], "composite": result.copy()}, False
+
+
+def safe_body_input(image):
+    """Keep full pixels on the server; bound the editor's mobile GPU textures."""
+    from upload_safety import validate_image_path
+    if image is None:
+        raise ValueError("Choose a body image first.")
+    if isinstance(image, (str, Path)):
+        validate_image_path(image)
+        with Image.open(image) as source:
+            original = ImageOps.exif_transpose(source).convert("RGB")
+    else:
+        original = ImageOps.exif_transpose(image).convert("RGB")
+    preview = original.copy()
+    preview.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    return {"background": preview, "layers": [], "composite": preview.copy()}, False, original
+
+
+def transfer_body_arguments(args):
+    """Bind the original from this Gradio session to the submitted editor mask."""
+    settings = list(args[:-1])
+    if isinstance(settings[0], dict) and args[-1] is not None:
+        settings[0] = {**settings[0], "original": args[-1]}
+    return settings
 
 
 def retain_uploaded_head(image):
@@ -850,6 +881,15 @@ def release_models():
     return release_standalone_models()
 
 
+def server_control_locks():
+    from core_runtime import WORKER
+    return [WORKER.lock, _PIPELINE_LOCK]
+
+
+from server_controls import ServerControls, add_server_controls, register_servers
+SERVER_CONTROLS = ServerControls(server_control_locks, release_models)
+
+
 def run_swap(
     body_image: Image.Image | None,
     head_image: Image.Image | None,
@@ -928,6 +968,8 @@ def run_swap(
 
     with _PIPELINE_LOCK:
         started = time.perf_counter()
+        from server_controls import ensure_running
+        ensure_running()
         pipe = _load_pipeline()
         configure_speed_mode(pipe, keep_on_gpu, width, height)
         pipe.enable_lora()
@@ -993,19 +1035,27 @@ def build_likeness_ui(gr):
                         value="Edit painted area", label="Painted area",
                         info="Protect: cover the entire head you want kept, including hair. For two people, the model focuses on the opposite side.")
     with gr.Row(elem_id="ggf-reference-row"):
-        body = gr.ImageEditor(
-            type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
-            brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
-            label="1 — BODY REFERENCE (required): pose, clothes, scene",
-            elem_id="ggf-body-reference",
-        )
-        head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity",
-                        elem_id="ggf-head-reference")
+        with gr.Column():
+            body = gr.ImageEditor(
+                type="pil", format="png", image_mode="RGBA", transforms=(), layers=False,
+                sources=[],
+                brush=gr.Brush(colors=["#f5b942"], color_mode="fixed"), height=420,
+                label="1 — BODY REFERENCE (required): pose, clothes, scene",
+                elem_id="ggf-body-reference",
+            )
+            body_upload = gr.UploadButton("Upload / replace body image", file_types=["image"],
+                                          file_count="single", type="filepath", elem_id="ggf-body-upload")
+            gr.Markdown("Preview scaled for painting. Full-resolution original kept for generation.",
+                        elem_classes="ggf-guide")
+        with gr.Column():
+            head = gr.Image(type="pil", height=420, label="2 — HEAD REFERENCE (required): face, hair, identity",
+                            elem_id="ggf-head-reference")
+    body_original = gr.State(None)
     protect_editor_preprocessing(body)
     protect_head_preprocessing(head)
-    body.upload(lambda: False, outputs=[selected_only], queue=False,
-                show_progress="hidden", api_name=False)
-    body.clear(lambda: False, outputs=[selected_only], queue=False,
+    body_upload.upload(safe_body_input, inputs=[body_upload], outputs=[body, selected_only, body_original],
+                       queue=False, api_name=False, trigger_mode="once")
+    body.clear(lambda: (False, None), outputs=[selected_only, body_original], queue=False,
                show_progress="hidden", api_name=False)
     head.upload(retain_uploaded_head, inputs=[head], outputs=[head],
                 queue=False, show_progress="hidden", api_name=False)
@@ -1026,7 +1076,7 @@ def build_likeness_ui(gr):
         reuse_result = gr.Button("Use result as new body reference", interactive=False)
         send_to_inpaint = gr.Button("Edit result in Inpaint", interactive=False)
     reuse_result.click(fn=lambda: None, outputs=[body], queue=False, api_name=False).then(
-        fn=result_as_body_input, inputs=[last_result], outputs=[body, selected_only],
+        fn=safe_body_input, inputs=[last_result], outputs=[body, selected_only, body_original],
         api_name=False,
     )
     gr.Markdown(
@@ -1079,13 +1129,13 @@ def build_likeness_ui(gr):
     saved_file = gr.File(label="Saved PNG", elem_classes="ggf-download")
     used_seed = gr.Textbox(label="Used seed", interactive=False)
     release = gr.Button("Release models / free GPU memory")
-    release.click(fn=release_models, inputs=[], outputs=[status], concurrency_id="gpu")
+    release.click(fn=SERVER_CONTROLS.perform, inputs=[], outputs=[status], queue=False, api_name=False)
     def generate_transfer(*args):
-        result = run_swap_ui(*args)
+        result = run_swap_ui(*transfer_body_arguments(args))
         return (*result, result[0][1], gr.update(interactive=True), gr.update(interactive=True))
 
     def generate_turbo_transfer(*args):
-        settings = list(args)
+        settings = transfer_body_arguments(args)
         settings[8] = turbo_megapixels(settings[8])
         settings[9] = 1
         result = run_swap_ui(*settings, turbo_preview=True)
@@ -1093,13 +1143,13 @@ def build_likeness_ui(gr):
 
     transfer_inputs = [body, head, prompt, seed, randomize, bfs_strength, turbo_strength, steps,
                        working_mp, upscale, keep_on_gpu, extra_prompt, selected_only, feather,
-                       mask_mode, backend]
+                       mask_mode, backend, body_original]
     transfer_outputs = [output, saved_file, status, used_seed, last_result, reuse_result, send_to_inpaint]
     generate.click(fn=generate_transfer, inputs=transfer_inputs, outputs=transfer_outputs,
                    concurrency_id="gpu")
     turbo_generate.click(fn=generate_turbo_transfer, inputs=transfer_inputs,
                          outputs=transfer_outputs, concurrency_id="gpu", api_name="turbo_transfer")
-    return body, selected_only, last_result, send_to_inpaint
+    return body, selected_only, last_result, send_to_inpaint, body_original
 
 
 def build_ui():
@@ -1150,11 +1200,12 @@ def build_ui():
                         elem_classes="warning")
             with gr.Tabs() as tabs:
                 with gr.Tab("Likeness Transfer", id="likeness"):
-                    body_input, body_mask, likeness_result, send_to_inpaint = build_likeness_ui(gr)
+                    body_input, body_mask, likeness_result, send_to_inpaint, body_original = build_likeness_ui(gr)
                 with gr.Tab("Inpaint", id="inpaint"):
                     (inpaint_input, inpaint_result, send_to_likeness,
                      inpaint_reset_outputs, clear_inpaint_result) = build_inpaint_ui(gr, sys.modules[__name__])
                 with gr.Tab("Settings", id="settings"):
+                    add_server_controls(SERVER_CONTROLS)
                     with gr.Accordion("Network access", open=True):
                         gr.Markdown("Choose where Headliner can be opened. Changes take effect after restarting the server. "
                                     "A public link with no password can be used by anyone who has the link, including to change these settings.")
@@ -1204,7 +1255,7 @@ def build_ui():
                 return None
 
             def open_likeness(result):
-                return result_as_body_input(result)
+                return safe_body_input(result)
 
             send_to_likeness.click(
                 select_likeness, inputs=[inpaint_result], outputs=[tabs],
@@ -1212,7 +1263,7 @@ def build_ui():
             ).success(
                 clear_likeness_input, outputs=[body_input], queue=False, api_name=False,
             ).success(
-                open_likeness, inputs=[inpaint_result], outputs=[body_input, body_mask],
+                open_likeness, inputs=[inpaint_result], outputs=[body_input, body_mask, body_original],
                 queue=False, api_name=False,
             )
             gr.HTML(
@@ -1288,7 +1339,7 @@ def save_network_mode(mode: str, username: str, password: str):
     except OSError as error:
         return f"**Not saved:** Could not write network settings ({error}).", gr.update()
     label = {"local": "This computer only", "lan": "Local network", "public": "Temporary public link"}[saved["mode"]]
-    access_note = (f"Login will use username **{saved['username']}** and the password you entered."
+    access_note = (f"Remote login will use username **{saved['username']}** and the password you entered. Local access needs no login."
                    if saved["digest"] else
                    "**No login will be required. Anyone with the address can use the app and change Settings.**")
     return (f"Saved **{label}**. {access_note} Close this server and start Floyd Headliner again to apply it. "
@@ -1298,11 +1349,13 @@ def save_network_mode(mode: str, username: str, password: str):
 def active_network_status() -> str:
     label = {"local": "This computer only", "lan": "Local network", "public": "Temporary public link"}[ACTIVE_MODE]
     login = "Required" if ACTIVE_AUTH_ENABLED else "None"
-    return f"**Running mode:** {label}  \n**Login:** {login}  \n**Current address:** {ACTIVE_URL or 'Starting...'}"
+    return (f"**Running mode:** {label}  \n**Local app (no login):** {ACTIVE_LOCAL_URL or 'Starting...'}  \n"
+            f"**Remote login:** {login}  \n**Shared address:** "
+            f"{ACTIVE_URL if ACTIVE_MODE != 'local' and ACTIVE_URL != ACTIVE_LOCAL_URL else 'Not active'}")
 
 
 def main() -> int:
-    global ACTIVE_MODE, ACTIVE_URL, ACTIVE_AUTH_ENABLED
+    global ACTIVE_MODE, ACTIVE_URL, ACTIVE_LOCAL_URL, ACTIVE_AUTH_ENABLED
 
     parser = argparse.ArgumentParser(description="Standalone Floyd Headliner")
     parser.add_argument("--self-check", action="store_true")
@@ -1327,10 +1380,10 @@ def main() -> int:
     if args.host not in ("127.0.0.1", "localhost"):
         print("--host cannot change network exposure. Choose LAN or public access in Settings instead.")
         return 1
-    access = {"local": "127.0.0.1", "lan": "0.0.0.0", "public": "127.0.0.1"}[ACTIVE_MODE]
+    preferred_port = args.port if args.port is not None else int(os.environ.get("GRADIO_SERVER_PORT") or "7860")
 
     if ACTIVE_MODE == "local":
-        ports = (args.port,) if args.port is not None else range(7860, 7870)
+        ports = (preferred_port,) if args.port is not None else range(preferred_port, min(65536, preferred_port + 10))
         for port in ports:
             if existing_local_app(port):
                 url = f"http://127.0.0.1:{port}"
@@ -1339,22 +1392,17 @@ def main() -> int:
                 if not args.no_browser:
                     webbrowser.open(url)
                 return 0
-        if args.port is not None and local_port_in_use(args.port):
-            print(f"Port {args.port} is in use by another service. Start without --port to choose a free port.")
-            return 1
 
     if not select_startup_profile(args.profile):
         return 1
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    demo = build_ui()
     auth = None if not ACTIVE_AUTH_ENABLED else (
         lambda username, password: verify_login(username, password, settings)
     )
-    _, local_url, public_url = demo.queue(default_concurrency_limit=1).launch(
-        server_name=access,
-        server_port=args.port,
-        inbrowser=ACTIVE_MODE == "local" and not args.no_browser,
-        share=ACTIVE_MODE == "public",
+    local_demo, remote_demo, local_url, remote_url = launch_access_servers(
+        lambda: build_ui().queue(default_concurrency_limit=1),
+        mode=ACTIVE_MODE, preferred_port=preferred_port,
+        inbrowser=not args.no_browser,
         auth=auth,
         show_error=True,
         css=APP_CSS,
@@ -1362,12 +1410,10 @@ def main() -> int:
         allowed_paths=[str(OUTPUT_DIR)],
         prevent_thread_lock=True,
     )
-    ACTIVE_URL = public_url or local_url
+    ACTIVE_LOCAL_URL = local_url
+    register_servers(local_demo, remote_demo)
+    ACTIVE_URL = remote_url or local_url
     print(f"Floyd Headliner running in {ACTIVE_MODE} mode at {ACTIVE_URL}", flush=True)
-    if ACTIVE_MODE == "public" and not public_url:
-        demo.close()
-        print("Public share link could not be created. The server was closed.")
-        return 1
     threading.Event().wait()
     return 0
 

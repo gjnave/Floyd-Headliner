@@ -90,6 +90,8 @@ class Worker:
 
     def request(self, payload: dict, output_dir: Path) -> dict:
         with self.lock:
+            from server_controls import ensure_running
+            ensure_running()
             self.start(output_dir)
             try:
                 self.process.stdin.write(json.dumps(payload) + "\n")
@@ -115,7 +117,11 @@ class Worker:
                     process.stdin.flush()
                     process.wait(timeout=10)
                 except (OSError, subprocess.TimeoutExpired):
-                    process.terminate()
+                    if os.name == 'nt':
+                        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                                       capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    else:
+                        process.terminate()
                     try:
                         process.wait(timeout=5)
                     except subprocess.TimeoutExpired:
