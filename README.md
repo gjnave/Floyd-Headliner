@@ -48,20 +48,36 @@ For guided setup, use the [Quick Setup Helper](https://getgoingfast.pro/tools/fl
 at Get Going Fast. This public repository contains the app source; the
 one-click setup package is a separate Get Going Fast member offering.
 
-For manual source setup, install [uv](https://docs.astral.sh/uv/getting-started/installation/),
-then open **Command Prompt** in the directory where you want the repository:
+For manual source setup, use Windows 64-bit with a current NVIDIA driver. Install [Git for Windows](https://git-scm.com/download/win) and [uv](https://docs.astral.sh/uv/getting-started/installation/), then open **Command Prompt**:
 
-```bat
-git clone https://codeberg.org/Cognibuild/Floyd-Headliner
-cd Floyd-Headliner
-uv venv --python 3.11 .venv
-uv pip install --python .venv\Scripts\python.exe --upgrade pip setuptools wheel
-uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
-uv pip install --python .venv\Scripts\python.exe -r requirements.txt
-.venv\Scripts\python.exe download_models.py
-.venv\Scripts\python.exe download_fast_models.py
-.venv\Scripts\python.exe app.py
-```
+1. Clone the source and create its private Python 3.11 environment:
+
+   ```bat
+   git clone https://codeberg.org/Cognibuild/Floyd-Headliner
+   cd Floyd-Headliner
+   uv venv --managed-python --python 3.11 .venv
+   ```
+
+2. Install CUDA PyTorch and the app dependencies:
+
+   ```bat
+   uv pip install --python .venv\Scripts\python.exe --upgrade pip setuptools wheel
+   uv pip install --python .venv\Scripts\python.exe torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu130
+   uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+   ```
+
+3. Download and verify the app's pinned upstream model files:
+
+   ```bat
+   .venv\Scripts\python.exe download_models.py
+   .venv\Scripts\python.exe download_fast_models.py
+   ```
+
+4. Start the app (or double-click `run.bat`):
+
+   ```bat
+   .venv\Scripts\python.exe app.py
+   ```
 
 For the lower-VRAM mode, install `bitsandbytes==0.50.2` into the private
 environment and select the smaller six-step Viggle adapter before starting:
