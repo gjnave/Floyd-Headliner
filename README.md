@@ -2,18 +2,18 @@
 
 # Floyd Headliner — Likeness Transfer
 
-Settings includes **Release models / free GPU memory** and **Stop server**.
-Release unloads both inference engines while keeping the app and phone link open.
-The next generation reloads models automatically. Stop server asks for confirmation
-and requires restarting 2-START-Floyd-Headliner.bat on the local PC. Finish active
-generation first. The release button is also available on Likeness Transfer.
-
 ## A Get Going Fast Application
 
 ### [Quick Setup Helper → GetGoingFast.pro/tools/floydheadliner](https://getgoingfast.pro/tools/floydheadliner)
 
 For walkthroughs and updates, visit
 [The AI Hobby Guy on YouTube](https://youtube.com/@theaihobbyguy).
+
+Settings includes **Release models / free GPU memory** and **Stop server**.
+Release unloads both inference engines while keeping the app and phone link open.
+The next generation reloads models automatically. Stop server asks for confirmation
+and requires restarting 2-START-Floyd-Headliner.bat on the local PC. Finish active
+generation first. The release button is also available on Likeness Transfer.
 
 Floyd Headliner is a local Windows likeness-transfer app: provide a **body reference**
 for pose, clothing, and scene, then a **head reference** for face, hair, and
